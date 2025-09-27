@@ -1,0 +1,47 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: ankane/pgvector:latest
+    environment:
+      POSTGRES_DB: defense
+      POSTGRES_USER: defender
+      POSTGRES_PASSWORD: changeit
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "15672:15672"
+      - "5672:5672"
+
+  model-server:
+    build: ./model-server
+    ports:
+      - "11434:11434"
+
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql://defender:changeit@postgres:5432/defense
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      MODEL_SERVER_URL: http://model-server:11434
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+      - rabbitmq
+      - model-server
+
+  linux-scanner:
+    build: ./linux-scanner
+    environment:
+      BACKEND_URL: http://backend:8000
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
