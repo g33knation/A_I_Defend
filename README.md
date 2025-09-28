@@ -21,5 +21,5 @@ The architecture is designed like an octopus:
 
 ### 1. Clone repo
 ```bash
-git clone https://github.com/USERNAME/defense-ai-octopus.git
-cd defense-ai-octopus
+git clone https://github.com/g33knation/A_I_Defend.git
+cd A_I_Defend
