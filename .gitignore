@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+*.log
+
+# Virtual envs
+.env
+.venv
+env/
+venv/
+
+# Docker
+*.pid
+*.seed
+*.pid.lock
+
+# Postgres data (local volume)
+pgdata/
+
+# VSCode / IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
