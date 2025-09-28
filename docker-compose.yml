@@ -1,63 +1,53 @@
 version: "3.9"
 
 services:
-  postgres:
-    image: ankane/pgvector:latest
-    container_name: a_i_defend-postgres-1
-    restart: always
+  backend:
+    build: ./backend
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: changeit
-      POSTGRES_DB: defense
+      DATABASE_URL: postgres://user:pass@db:5432/defense
+    depends_on:
+      - db
+      - rabbitmq
     ports:
-      - "5432:5432"
+      - "8000:8000"
+
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: pass
+      POSTGRES_DB: defense
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./backend/app/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - db_data:/var/lib/postgresql/data
 
   rabbitmq:
     image: rabbitmq:3-management
-    container_name: a_i_defend-rabbitmq-1
-    restart: always
     ports:
       - "5672:5672"
-      - "15672:15672" # management UI
+      - "15672:15672"
 
   model-server:
-    image: a_i_defend-model-server
-    container_name: a_i_defend-model-server-1
-    build:
-      context: ./model-server
-    restart: always
+    build: ./model-server
     ports:
       - "11434:11434"
 
-  backend:
-    image: a_i_defend-backend
-    container_name: a_i_defend-backend-1
-    build:
-      context: ./backend
-    restart: always
-    environment:
-      DATABASE_URL: postgresql://postgres:changeit@postgres:5432/defense
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
-      MODEL_SERVER_URL: http://model-server:11434
-    ports:
-      - "8000:8000"
-    depends_on:
-      - postgres
-      - rabbitmq
-      - model-server
-
   linux-scanner:
-    image: a_i_defend-linux-scanner
-    container_name: a_i_defend-linux-scanner-1
-    build:
-      context: ./linux-scanner
-    restart: always
+    build: ./linux-scanner
+    environment:
+      BACKEND_URL: http://backend:8000
+      SCAN_INTERVAL: 600   # seconds between scans
+    volumes:
+      - /var/log:/var/log:ro          # host logs (read-only)
+      - /mnt/c:/mnt/c:ro              # OPTIONAL: scan Windows drive (if WSL)
+      - ./rules:/rules:ro             # YARA rules directory
+      - ./suricata:/etc/suricata:ro   # optional Suricata config
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    network_mode: "bridge"
     depends_on:
       - backend
-      - rabbitmq
 
 volumes:
-  postgres_data:
+  db_data:
+
