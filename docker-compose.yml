@@ -1,50 +1,60 @@
 version: "3.9"
 
 services:
-  backend:
-    build: ./backend
-    environment:
-      DATABASE_URL: postgres://user:pass@db:5432/defense
-    depends_on:
-      - db
-      - rabbitmq
-    ports:
-      - "8000:8000"
-
   db:
     image: postgres:15
+    container_name: db
     environment:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: pass
       POSTGRES_DB: defense
     volumes:
       - db_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d defense"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   rabbitmq:
     image: rabbitmq:3-management
+    container_name: rabbitmq
     ports:
       - "5672:5672"
       - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmqctl", "status"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
 
   model-server:
     build: ./model-server
+    container_name: model-server
     ports:
       - "11434:11434"
 
-  linux-scanner:
-    build: ./linux-scanner
+  backend:
+    build: ./backend
+    container_name: backend
     environment:
-      BACKEND_URL: http://backend:8000
-      SCAN_INTERVAL: 600   # seconds between scans
-    volumes:
-      - /var/log:/var/log:ro          # host logs (read-only)
-      - /mnt/c:/mnt/c:ro              # OPTIONAL: scan Windows drive (if WSL)
-      - ./rules:/rules:ro             # YARA rules directory
-      - ./suricata:/etc/suricata:ro   # optional Suricata config
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
-    network_mode: "bridge"
+      DATABASE_URL: postgres://user:pass@db:5432/defense
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    container_name: frontend
+    ports:
+      - "8001:80"
     depends_on:
       - backend
 
