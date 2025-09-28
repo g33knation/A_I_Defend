@@ -3,30 +3,43 @@ version: "3.9"
 services:
   postgres:
     image: ankane/pgvector:latest
+    container_name: a_i_defend-postgres-1
+    restart: always
     environment:
-      POSTGRES_DB: defense
-      POSTGRES_USER: defender
+      POSTGRES_USER: postgres
       POSTGRES_PASSWORD: changeit
+      POSTGRES_DB: defense
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/app/init.sql:/docker-entrypoint-initdb.d/init.sql
 
   rabbitmq:
     image: rabbitmq:3-management
+    container_name: a_i_defend-rabbitmq-1
+    restart: always
     ports:
-      - "15672:15672"
       - "5672:5672"
+      - "15672:15672" # management UI
 
   model-server:
-    build: ./model-server
+    image: a_i_defend-model-server
+    container_name: a_i_defend-model-server-1
+    build:
+      context: ./model-server
+    restart: always
     ports:
       - "11434:11434"
 
   backend:
-    build: ./backend
+    image: a_i_defend-backend
+    container_name: a_i_defend-backend-1
+    build:
+      context: ./backend
+    restart: always
     environment:
-      DATABASE_URL: postgresql://defender:changeit@postgres:5432/defense
+      DATABASE_URL: postgresql://postgres:changeit@postgres:5432/defense
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
       MODEL_SERVER_URL: http://model-server:11434
     ports:
@@ -37,11 +50,14 @@ services:
       - model-server
 
   linux-scanner:
-    build: ./linux-scanner
-    environment:
-      BACKEND_URL: http://backend:8000
+    image: a_i_defend-linux-scanner
+    container_name: a_i_defend-linux-scanner-1
+    build:
+      context: ./linux-scanner
+    restart: always
     depends_on:
       - backend
+      - rabbitmq
 
 volumes:
-  pgdata:
+  postgres_data:
