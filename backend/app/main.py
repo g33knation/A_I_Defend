@@ -6,7 +6,12 @@ import os
 
 app = FastAPI(title="Defense AI Backend")
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://defender:changeit@postgres/defense")
+# Database configuration
+DB_USER = os.getenv("POSTGRES_USER", "user")
+DB_PASSWORD = os.getenv("POSTGRES_PASSWORD", "pass")
+DB_HOST = os.getenv("POSTGRES_HOST", "db")
+DB_NAME = os.getenv("POSTGRES_DB", "defense")
+DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/{DB_NAME}"
 MODEL_SERVER_URL = os.getenv("MODEL_SERVER_URL", "http://model-server:11434")
 
 # DB pool

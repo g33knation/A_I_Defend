@@ -50,6 +50,18 @@ services:
     ports:
       - "8001:80"
 
+  scanner:
+    build: ./scanners
+    container_name: scanner
+    depends_on:
+      - backend
+    environment:
+      - API_URL=http://backend:8000/events
+    volumes:
+      - /etc:/etc:ro
+      - /var/log:/var/log:ro
+    restart: unless-stopped
+
 volumes:
   db_data:
 
