@@ -21,7 +21,7 @@ services:
     volumes:
       - db_data:/var/lib/postgresql/data
     ports:
-      - "5433:5432"   # changed host port to 5433
+      - "5434:5432"   # changed host port to 5433
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U user -d defense"]
       interval: 5s
@@ -52,3 +52,4 @@ services:
 
 volumes:
   db_data:
+
