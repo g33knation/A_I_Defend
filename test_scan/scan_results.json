@@ -1,0 +1,90 @@
+{
+  "scan_id": "scan_20250929_221609",
+  "timestamp": "2025-09-29T22:16:17.700107",
+  "scanners_run": [
+    "nmap",
+    "file_integrity"
+  ],
+  "results": [
+    {
+      "type": "file_integrity",
+      "severity": "high",
+      "message": "File integrity event: File Modified - C:\\A_I_Defend\\test_scan\\test_files\\test1.txt",
+      "timestamp": "scan_20250929_221609",
+      "details": {
+        "file_path": "C:\\A_I_Defend\\test_scan\\test_files\\test1.txt",
+        "current_info": {
+          "hash": "9e4fa7262c308e5ac346b4347555754bdc1f6f34a209cbee0a6d5c87eb9bbf5b",
+          "size": 62,
+          "modified": 1759182083.041647,
+          "permissions": "0o666",
+          "uid": 0,
+          "gid": 0,
+          "inode": 221520806671295419,
+          "device": 8427139
+        },
+        "baseline_info": {
+          "hash": "e3cf3b2ac14275b08d8d6ca1b580af4e8bb1be29ac00436ddf79fa5f42765751",
+          "size": 70,
+          "modified": 1759181703.3061516,
+          "permissions": "0o666",
+          "uid": 0,
+          "gid": 0,
+          "inode": 221520806671295419,
+          "device": 8427139
+        },
+        "event_type": "file_modified",
+        "timestamp": "scan_20250929_221609"
+      }
+    },
+    {
+      "type": "port_scan",
+      "severity": "high",
+      "target": "127.0.0.1",
+      "port": 135,
+      "protocol": "tcp",
+      "service": "msrpc",
+      "product": "Microsoft Windows RPC",
+      "version": "",
+      "timestamp": "scan_20250929_221609",
+      "details": {
+        "nmap_data": {
+          "port": 135,
+          "protocol": "tcp",
+          "state": "open",
+          "service": {
+            "name": "msrpc",
+            "product": "Microsoft Windows RPC",
+            "version": "",
+            "extrainfo": ""
+          }
+        }
+      }
+    },
+    {
+      "type": "port_scan",
+      "severity": "high",
+      "target": "127.0.0.1",
+      "port": 445,
+      "protocol": "tcp",
+      "service": "microsoft-ds",
+      "product": "",
+      "version": "",
+      "timestamp": "scan_20250929_221609",
+      "details": {
+        "nmap_data": {
+          "port": 445,
+          "protocol": "tcp",
+          "state": "open",
+          "service": {
+            "name": "microsoft-ds",
+            "product": "",
+            "version": "",
+            "extrainfo": ""
+          }
+        }
+      }
+    }
+  ],
+  "errors": []
+}

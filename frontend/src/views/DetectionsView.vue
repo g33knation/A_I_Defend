@@ -7,6 +7,8 @@ const searchQuery = ref('');
 const selectedStatus = ref('all');
 const currentPage = ref(1);
 const itemsPerPage = 10;
+const isScanning = ref(false);
+const scanStatus = ref('');
 
 const statusOptions = [
   { value: 'all', label: 'All Statuses' },
@@ -47,12 +49,71 @@ const formatDate = (dateString) => {
 const changePage = (page) => {
   if (page >= 1 && page <= totalPages.value) {
     currentPage.value = page;
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 };
 
 const submitFeedback = async (detectionId, feedback) => {
   await store.submitFeedback(detectionId, feedback);
+  await store.fetchDetections();
+};
+
+const runManualScan = async () => {
+  try {
+    isScanning.value = true;
+    scanStatus.value = 'Starting manual scan...';
+    
+    const response = await fetch(`${store.API_BASE}/scans/start`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        scanners: ["nmap", "lynis", "clamav", "chkrootkit", "rkhunter", "yara", "suricata"]
+      })
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to start scan');
+    }
+    
+    const { scan_id } = await response.json();
+    scanStatus.value = 'Scan in progress...';
+    
+    // Poll for scan completion
+    let attempts = 0;
+    const maxAttempts = 60; // 5 minutes max (5 seconds * 60 = 300 seconds)
+    
+    while (attempts < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, 5000)); // Check every 5 seconds
+      
+      const statusResponse = await fetch(`${store.API_BASE}/scans/${scan_id}`);
+      const statusData = await statusResponse.json();
+      
+      if (statusData.status === 'completed') {
+        scanStatus.value = 'Scan completed! Refreshing detections...';
+        await store.fetchDetections();
+        break;
+      } else if (statusData.status === 'failed') {
+        throw new Error(statusData.error || 'Scan failed');
+      }
+      
+      attempts++;
+    }
+    
+    if (attempts >= maxAttempts) {
+      throw new Error('Scan timed out');
+    }
+    
+  } catch (error) {
+    console.error('Error running manual scan:', error);
+    scanStatus.value = `Error: ${error.message}`;
+  } finally {
+    isScanning.value = false;
+    // Clear status after 5 seconds
+    setTimeout(() => {
+      scanStatus.value = '';
+    }, 5000);
+  }
 };
 
 const getStatusBadgeClass = (status) => {
@@ -61,7 +122,6 @@ const getStatusBadgeClass = (status) => {
       return 'bg-red-100 text-red-800';
     case 'false_positive':
       return 'bg-yellow-100 text-yellow-800';
-    default:
       return 'bg-blue-100 text-blue-800';
   }
 };
@@ -85,9 +145,23 @@ onMounted(() => {
 <template>
   <div>
     <div class="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
-      <div>
+      <div class="flex-1">
         <h1 class="text-2xl font-bold text-gray-800">Threat Detections</h1>
         <p class="mt-1 text-sm text-gray-500">Review and respond to potential security threats</p>
+        {scanStatus && <p class="text-sm text-blue-600 mt-1">{{ scanStatus }}</p>}
+      </div>
+      <div>
+        <button
+          @click="runManualScan"
+          :disabled="isScanning"
+          class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <svg v-if="isScanning" class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          {{ isScanning ? 'Scanning...' : 'Run Manual Scan' }}
+        </button>
       </div>
       <div class="mt-4 md:mt-0 flex flex-col sm:flex-row gap-3">
         <div class="relative">

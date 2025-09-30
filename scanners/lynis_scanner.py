@@ -173,7 +173,7 @@ class LynisScanner(BaseScanner):
         results = []
         
         # Extract warnings
-        warnings_section = re.search(r"Warnings \(([0-9]+)\):([\s\S]*?)(?=\n\[\*\]|")", report_text)
+        warnings_section = re.search(r"Warnings \(([0-9]+)\):([\s\S]*?)(?=\n\[\*\]|\Z)", report_text)
         if warnings_section:
             warnings = warnings_section.group(2).strip().split("\n")
             for warning in warnings:
@@ -196,7 +196,7 @@ class LynisScanner(BaseScanner):
                 results.append(result)
         
         # Extract suggestions
-        suggestions_section = re.search(r"Suggestions \(([0-9]+)\):([\s\S]*?)(?=\n\[\*\]|")", report_text)
+        suggestions_section = re.search(r"Suggestions \(([0-9]+)\):([\s\S]*?)(?=\n\[\*\]|\Z)", report_text)
         if suggestions_section:
             suggestions = suggestions_section.group(2).strip().split("\n")
             for suggestion in suggestions:

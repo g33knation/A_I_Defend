@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue';
 import { useDefenseStore } from '@/stores/defense';
+import SecurityScanner from '@/components/SecurityScanner.vue';
 
 const store = useDefenseStore();
 
@@ -11,9 +12,14 @@ const systemStatus = ref([
   { name: 'File Scanner', status: 'running' },
   { name: 'NMAP Scanner', status: 'idle' },
   { name: 'Lynis Scanner', status: 'idle' },
+  { name: 'ClamAV', status: 'idle' },
+  { name: 'RKHunter', status: 'idle' },
+  { name: 'YARA', status: 'idle' },
+  { name: 'Suricata', status: 'idle' },
 ]);
 
 const lastScanTime = ref('Just now');
+const activeTab = ref('dashboard'); // 'dashboard' or 'scanner'
 
 // Sample data for charts
 const chartData = ref({
@@ -184,27 +190,64 @@ onMounted(() => {
 <template>
   <div class="p-6 max-w-7xl mx-auto">
     <!-- Header -->
-    <div class="flex justify-between items-center mb-8">
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
       <div>
         <h1 class="text-3xl font-bold text-gray-800">Security Dashboard</h1>
         <p class="text-gray-600">Overview of your system's security status</p>
       </div>
-      <div class="flex items-center space-x-4">
-        <button @click="refreshData" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center">
+      <div class="flex flex-wrap gap-2">
+        <button 
+          @click="refreshData" 
+          class="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+        >
           <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
             <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd" />
           </svg>
-          Refresh
+          Refresh Data
+        </button>
+        <button 
+          @click="runQuickScan" 
+          class="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M4 5a2 2 0 00-2 2v8a2 2 0 002 2h12a2 2 0 002-2V7a2 2 0 00-2-2h-1.586a1 1 0 01-.707-.293l-1.121-1.121A2 2 0 0011.172 3H8.828a2 2 0 00-1.414.586L6.293 4.707A1 1 0 015.586 5H4zm6 9a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd" />
+          </svg>
+          Quick Scan
         </button>
       </div>
     </div>
     
-    <!-- Stats Cards -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-      <!-- Total Events -->
-      <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition-shadow">
-        <div class="flex items-center">
-          <div class="p-3 rounded-full bg-blue-50 text-blue-600">
+    <!-- Navigation Tabs -->
+    <div class="border-b border-gray-200 mb-6">
+      <nav class="-mb-px flex space-x-8">
+        <button 
+          @click="activeTab = 'dashboard'" 
+          :class="[activeTab === 'dashboard' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300', 'whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm']"
+        >
+          Dashboard
+        </button>
+        <button 
+          @click="activeTab = 'scanner'" 
+          :class="[activeTab === 'scanner' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300', 'whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm']"
+        >
+          Security Scanner
+        </button>
+      </nav>
+    </div>
+
+    <!-- Scanner View -->
+    <div v-if="activeTab === 'scanner'" class="mb-8">
+      <SecurityScanner />
+    </div>
+
+    <!-- Dashboard View -->
+    <div v-else>
+      <!-- Stats Cards -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <!-- Total Events -->
+        <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition-shadow">
+          <div class="flex items-center">
+            <div class="p-3 rounded-full bg-blue-50 text-blue-600">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
             </svg>
@@ -262,6 +305,7 @@ onMounted(() => {
       </div>
     </div>
 
+    <!-- Activity and System Status -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
       <!-- Activity Chart -->
       <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100 lg:col-span-2">
@@ -307,6 +351,7 @@ onMounted(() => {
       </div>
     </div>
 
+    <!-- Detections and Events -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <!-- Recent Detections -->
       <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
@@ -381,4 +426,9 @@ onMounted(() => {
       </div>
     </div>
   </div>
+</div>
 </template>
+
+<style scoped>
+/* Add any component-specific styles here */
+</style>

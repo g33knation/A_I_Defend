@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  scanner:
+    build:
+      context: .
+      dockerfile: scanners/Dockerfile
+    container_name: a_i_defend_scanner
+    privileged: true  # Required for Nmap to run properly
+    network_mode: host  # To scan the host network
+    volumes:
+      - ./test_scan:/app/test_scan  # To persist scan results
+      - /:/host:ro  # Read-only mount of the host filesystem
+    environment:
+      - SCAN_TARGET=host.docker.internal  # For macOS/Windows
+      # For Linux, you might need to use the actual host IP
+      # - SCAN_TARGET=your-host-ip
+    command: >
+      sh -c "python -c '
+      import asyncio
+      from scanners.scanner_manager import ScannerManager
+      import os
+      
+      async def main():
+          config = {
+              \"scanners\": [\"nmap\", \"file_integrity\"],
+              \"nmap\": {
+                  \"targets\": [os.getenv(\"SCAN_TARGET\", \"host.docker.internal\")],
+                  \"ports\": \"1-1000\",
+                  \"arguments\": \"-T4 -A -v\"
+              },
+              \"file_integrity\": {
+                  \"paths\": [\"/host/etc\", \"/host/var/log\"],
+                  \"baseline_file\": \"/app/test_scan/baseline.json\"
+              }
+          }
+          
+          print(\"Starting scanner with config:\", config)
+          manager = ScannerManager(config)
+          success = await manager.run_scan()
+          output_file = \"/app/test_scan/scan_results.json\"
+          manager.save_results(output_file)
+          print(f\"Scan {'completed successfully' if success else 'failed'}. Results saved to {output_file}\")
+      
+      asyncio.run(main())
+      '
+      "
+    restart: unless-stopped

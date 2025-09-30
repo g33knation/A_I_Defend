@@ -8,6 +8,7 @@ from .base_scanner import BaseScanner
 from .nmap_scanner import NmapScanner
 from .lynis_scanner import LynisScanner
 from .file_integrity_monitor import FileIntegrityMonitor
+from .linux.security_scanner import SecurityScanner
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,8 @@ class ScannerManager:
     SCANNER_CLASSES = {
         "nmap": NmapScanner,
         "lynis": LynisScanner,
-        "file_integrity": FileIntegrityMonitor
+        "file_integrity": FileIntegrityMonitor,
+        "security": SecurityScanner  # Add the comprehensive security scanner
     }
     
     def __init__(self, config: Dict[str, Any] = None):
