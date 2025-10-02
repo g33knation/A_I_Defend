@@ -77,11 +77,15 @@ export const useDefenseStore = defineStore('defense', () => {
   }
 
   function updateStats(detections) {
+    const openDets = detections.filter(d => !d.feedback || d.feedback === null);
+    const confirmedThreats = detections.filter(d => d.feedback === 'confirmed_threat');
+    const falsePos = detections.filter(d => d.feedback === 'false_positive');
+    
     stats.value = {
       totalEvents: events.value.length,
-      openDetections: detections.filter(d => !d.feedback).length,
-      threatsBlocked: detections.filter(d => d.feedback === 'confirmed_threat').length,
-      falsePositives: detections.filter(d => d.feedback === 'false_positive').length
+      openDetections: openDets.length,
+      threatsBlocked: confirmedThreats.length,
+      falsePositives: falsePos.length
     };
   }
 

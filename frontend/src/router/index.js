@@ -21,6 +21,11 @@ const routes = [
     path: '/ask',
     name: 'ask',
     component: () => import('../views/AskView.vue')
+  },
+  {
+    path: '/agents',
+    name: 'agents',
+    component: () => import('../views/AgentsView.vue')
   }
 ];
 

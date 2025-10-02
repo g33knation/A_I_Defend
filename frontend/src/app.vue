@@ -77,6 +77,15 @@ onMounted(() => {
           </RouterLink>
           
           <RouterLink 
+            to="/agents" 
+            class="flex items-center px-6 py-3 text-indigo-200 hover:bg-indigo-700"
+            active-class="bg-indigo-900 text-white"
+          >
+            <span class="mr-3">🐙</span>
+            <span>Scanner Agents</span>
+          </RouterLink>
+          
+          <RouterLink 
             to="/ask" 
             class="flex items-center px-6 py-3 text-indigo-200 hover:bg-indigo-700"
             active-class="bg-indigo-900 text-white"

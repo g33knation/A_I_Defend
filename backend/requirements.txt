@@ -3,3 +3,4 @@ uvicorn
 asyncpg
 httpx
 pydantic
+yara-python

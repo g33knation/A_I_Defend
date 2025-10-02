@@ -42,23 +42,75 @@ class ScanResult(BaseModel):
 async def run_scan_async(scan_id: str, config: Dict[str, Any]):
     """Run a security scan asynchronously."""
     try:
-        scanner = SecurityScanner(config)
-        await scanner.scan()
+        # Execute the scan in the scanner container via Docker exec
+        import subprocess
+        import json
         
-        # Store results
-        scan_results[scan_id] = {
-            "status": "completed",
-            "end_time": datetime.utcnow(),
-            "results": scanner.to_dict(),
-            "error": None
-        }
+        # Create a config file for the scanner
+        config_json = json.dumps(config)
+        
+        # Run the scan in the scanner container
+        result = subprocess.run(
+            ["docker", "exec", "scanner", "python", "-W", "ignore", "-c", f"""
+import asyncio
+import json
+import sys
+import os
+import warnings
+warnings.filterwarnings('ignore')
+os.chdir('/app')
+sys.path.insert(0, '/app')
+from linux.security_scanner import SecurityScanner
+
+async def main():
+    config = {config_json}
+    # Override API URL to use backend container hostname
+    if 'api_url' not in config:
+        config['api_url'] = 'http://backend:8000/events'
+    scanner = SecurityScanner(config)
+    await scanner.scan()
+    # Only print JSON output, suppress all other output
+    print(json.dumps(scanner.to_dict()))
+
+asyncio.run(main())
+"""],
+            capture_output=True,
+            text=True,
+            timeout=1800  # 30 minute timeout
+        )
+        
+        if result.returncode == 0 and result.stdout:
+            try:
+                scan_data = json.loads(result.stdout)
+                scan_results[scan_id].update({
+                    "status": "completed",
+                    "end_time": datetime.utcnow(),
+                    "results": scan_data,
+                    "error": None
+                })
+            except json.JSONDecodeError as e:
+                scan_results[scan_id].update({
+                    "status": "failed",
+                    "end_time": datetime.utcnow(),
+                    "results": None,
+                    "error": f"Failed to parse scan output: {str(e)}\nOutput: {result.stdout}"
+                })
+        else:
+            scan_results[scan_id].update({
+                "status": "failed",
+                "end_time": datetime.utcnow(),
+                "results": None,
+                "error": f"Scan failed with exit code {result.returncode}\nStderr: {result.stderr}\nStdout: {result.stdout}"
+            })
+            
     except Exception as e:
-        scan_results[scan_id] = {
+        # Update results (preserve start_time)
+        scan_results[scan_id].update({
             "status": "failed",
             "end_time": datetime.utcnow(),
             "results": None,
             "error": str(e)
-        }
+        })
 
 @router.post("/start", response_model=Dict[str, str])
 async def start_scan(
@@ -98,9 +150,9 @@ async def get_scan_result(scan_id: str):
     result = scan_results[scan_id]
     return {
         "scan_id": scan_id,
-        "status": result["status"],
-        "start_time": result["start_time"],
-        "end_time": result["end_time"],
+        "status": result.get("status", "unknown"),
+        "start_time": result.get("start_time"),
+        "end_time": result.get("end_time"),
         "results": result.get("results"),
         "error": result.get("error")
     }
@@ -111,9 +163,9 @@ async def list_scans():
     return [
         {
             "scan_id": scan_id,
-            "status": result["status"],
-            "start_time": result["start_time"],
-            "end_time": result["end_time"]
+            "status": result.get("status", "unknown"),
+            "start_time": result.get("start_time"),
+            "end_time": result.get("end_time")
         }
         for scan_id, result in scan_results.items()
     ]

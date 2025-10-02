@@ -3,43 +3,78 @@
     <div class="scanner-header">
       <h2>Security Scanner</h2>
       <div class="scanner-actions">
-        <button 
-          @click="startScan" 
-          :disabled="isScanning" 
-          class="btn btn-primary"
-        >
-          {{ isScanning ? 'Scanning...' : 'Run Security Scan' }}
-        </button>
+        <div class="scan-buttons">
+          <button 
+            @click="startScan('quick')" 
+            :disabled="isScanning" 
+            class="btn btn-primary"
+          >
+            {{ isScanning ? 'Scanning...' : 'Quick Scan' }}
+          </button>
+          <button 
+            @click="startScan('full')" 
+            :disabled="isScanning" 
+            class="btn btn-secondary"
+          >
+            {{ isScanning ? 'Scanning...' : 'Full Scan' }}
+          </button>
+          <button 
+            @click="stopScan" 
+            v-if="isScanning" 
+            class="btn btn-danger"
+          >
+            Stop Scan
+          </button>
+        </div>
         
         <div class="scanner-options">
-          <label>
-            <input type="checkbox" v-model="scanOptions.nmap" :disabled="isScanning">
-            Nmap
-          </label>
-          <label>
-            <input type="checkbox" v-model="scanOptions.lynis" :disabled="isScanning">
-            Lynis
-          </label>
-          <label>
-            <input type="checkbox" v-model="scanOptions.clamav" :disabled="isScanning">
-            ClamAV
-          </label>
-          <label>
-            <input type="checkbox" v-model="scanOptions.chkrootkit" :disabled="isScanning">
-            Chkrootkit
-          </label>
-          <label>
-            <input type="checkbox" v-model="scanOptions.rkhunter" :disabled="isScanning">
-            RKHunter
-          </label>
-          <label>
-            <input type="checkbox" v-model="scanOptions.yara" :disabled="isScanning">
-            YARA
-          </label>
-          <label>
-            <input type="checkbox" v-model="scanOptions.suricata" :disabled="isScanning">
-            Suricata
-          </label>
+          <div class="scanner-option-group">
+            <h4>Network Scanners</h4>
+            <label>
+              <input type="checkbox" v-model="scanOptions.nmap" :disabled="isScanning">
+              Nmap Network Scan
+            </label>
+            <label>
+              <input type="checkbox" v-model="scanOptions.tshark" :disabled="isScanning">
+              TShark Traffic Analysis
+            </label>
+          </div>
+          
+          <div class="scanner-option-group">
+            <h4>Malware Scanners</h4>
+            <label>
+              <input type="checkbox" v-model="scanOptions.clamav" :disabled="isScanning">
+              ClamAV Antivirus
+            </label>
+            <label>
+              <input type="checkbox" v-model="scanOptions.yara" :disabled="isScanning">
+              YARA Rules
+            </label>
+          </div>
+          
+          <div class="scanner-option-group">
+            <h4>System Scanners</h4>
+            <label>
+              <input type="checkbox" v-model="scanOptions.lynis" :disabled="isScanning">
+              Lynis Audit
+            </label>
+            <label>
+              <input type="checkbox" v-model="scanOptions.chkrootkit" :disabled="isScanning">
+              Chkrootkit
+            </label>
+            <label>
+              <input type="checkbox" v-model="scanOptions.rkhunter" :disabled="isScanning">
+              RKHunter
+            </label>
+          </div>
+          
+          <div class="scanner-option-group">
+            <h4>IDS/IPS</h4>
+            <label>
+              <input type="checkbox" v-model="scanOptions.suricata" :disabled="isScanning">
+              Suricata IDS
+            </label>
+          </div>
         </div>
       </div>
     </div>
@@ -63,32 +98,32 @@
         <pre>{{ activeScan.error }}</pre>
       </div>
       
-      <div v-if="activeScan.results" class="scan-results">
+      <div v-if="activeScan.findings && activeScan.findings.length > 0" class="scan-results">
         <div class="results-summary">
           <div class="summary-item">
-            <span class="summary-count">{{ activeScan.results.length }}</span>
+            <span class="summary-count">{{ activeScan.findings.length }}</span>
             <span class="summary-label">Total Findings</span>
           </div>
-          <div class="summary-item" v-if="activeScan.results.critical > 0">
-            <span class="summary-count critical">{{ activeScan.results.critical }}</span>
+          <div class="summary-item" v-if="severityCount('critical') > 0">
+            <span class="summary-count critical">{{ severityCount('critical') }}</span>
             <span class="summary-label">Critical</span>
           </div>
-          <div class="summary-item" v-if="activeScan.results.high > 0">
-            <span class="summary-count high">{{ activeScan.results.high }}</span>
+          <div class="summary-item" v-if="severityCount('high') > 0">
+            <span class="summary-count high">{{ severityCount('high') }}</span>
             <span class="summary-label">High</span>
           </div>
-          <div class="summary-item" v-if="activeScan.results.medium > 0">
-            <span class="summary-count medium">{{ activeScan.results.medium }}</span>
+          <div class="summary-item" v-if="severityCount('medium') > 0">
+            <span class="summary-count medium">{{ severityCount('medium') }}</span>
             <span class="summary-label">Medium</span>
           </div>
-          <div class="summary-item" v-if="activeScan.results.low > 0">
-            <span class="summary-count low">{{ activeScan.results.low }}</span>
+          <div class="summary-item" v-if="severityCount('low') > 0">
+            <span class="summary-count low">{{ severityCount('low') }}</span>
             <span class="summary-label">Low</span>
           </div>
         </div>
         
         <div class="findings-list">
-          <div v-for="(finding, index) in activeScan.results" :key="index" class="finding-item">
+          <div v-for="(finding, index) in activeScan.findings" :key="index" class="finding-item">
             <div class="finding-header" @click="toggleFinding(index)">
               <span class="finding-severity" :class="finding.severity">
                 {{ finding.severity }}
@@ -101,9 +136,9 @@
               </span>
             </div>
             <div v-if="expandedFindings.includes(index)" class="finding-details">
-              <pre>{{ JSON.stringify(finding.details, null, 2) }}</pre>
+              <pre>{{ JSON.stringify(finding.details || finding, null, 2) }}</pre>
               <div class="finding-actions">
-                <button class="btn btn-sm" @click="dismissFinding(finding.id)">
+                <button class="btn btn-sm" @click="dismissFinding(finding.id || index)">
                   Dismiss
                 </button>
                 <button class="btn btn-sm btn-primary" @click="investigateFinding(finding)">
@@ -180,27 +215,80 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, reactive } from 'vue';
 import { useToast } from 'vue-toastification';
 
+// Use window.location to determine API URL dynamically
+const getApiBaseUrl = () => {
+  // If running on port 8001 (frontend), API is on port 8000
+  if (window.location.port === '8001') {
+    return 'http://localhost:8000';
+  }
+  // Otherwise use the same origin
+  return window.location.origin;
+};
+
+const apiBaseUrl = getApiBaseUrl();
 const toast = useToast();
-const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 // State
 const isScanning = ref(false);
 const activeScan = ref(null);
+const scanResults = reactive({
+  nmap: null,
+  tshark: null,
+  clamav: null,
+  lynis: null,
+  chkrootkit: null,
+  rkhunter: null,
+  yara: null,
+  suricata: null
+});
+
+// Scan options with default values
+const scanOptions = reactive({
+  nmap: true,
+  tshark: true,
+  clamav: true,
+  lynis: false,
+  chkrootkit: false,
+  rkhunter: false,
+  yara: false,
+  suricata: false,
+  target: 'localhost',
+  scanIntensity: 'normal' // quick, normal, aggressive
+});
+
+// Scanner configurations
+const scannerConfigs = {
+  quick: {
+    nmap: true,
+    tshark: false,
+    clamav: true,
+    lynis: false,
+    chkrootkit: false,
+    rkhunter: false,
+    yara: false,
+    suricata: false,
+    scanIntensity: 'quick'
+  },
+  full: {
+    nmap: true,
+    tshark: true,
+    clamav: true,
+    lynis: true,
+    chkrootkit: true,
+    rkhunter: true,
+    yara: true,
+    suricata: true,
+    scanIntensity: 'aggressive'
+  }
+};
+
+// Scan history and UI state
 const scanHistory = ref([]);
 const expandedFindings = ref([]);
 const scanProgress = ref(0);
-const scanOptions = ref({
-  nmap: true,
-  lynis: true,
-  clamav: true,
-  chkrootkit: true,
-  rkhunter: true,
-  yara: true,
-  suricata: true
-});
 
 // Computed
 const selectedScanners = computed(() => {
@@ -209,13 +297,27 @@ const selectedScanners = computed(() => {
     .map(([scanner]) => scanner);
 });
 
+const severityCount = (severity) => {
+  if (!activeScan.value || !activeScan.value.findings) return 0;
+  return activeScan.value.findings.filter(f => f.severity === severity).length;
+};
+
 // Methods
-const startScan = async () => {
+const startScan = async (scanType = 'quick') => {
   if (isScanning.value) return;
   
   try {
     isScanning.value = true;
     scanProgress.value = 0;
+    
+    // Update scan options based on scan type
+    const config = scannerConfigs[scanType] || scannerConfigs.quick;
+    Object.assign(scanOptions, config);
+    
+    // Get selected scanners
+    const selectedScanners = Object.entries(scanOptions)
+      .filter(([key, value]) => value && key !== 'target' && key !== 'scanIntensity')
+      .map(([key]) => key);
     
     const response = await fetch(`${apiBaseUrl}/api/scans/start`, {
       method: 'POST',
@@ -223,37 +325,44 @@ const startScan = async () => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        scanners: selectedScanners.value,
+        scanners: selectedScanners,
         config: {
-          // Add any additional scan configuration here
+          target: scanOptions.target,
+          intensity: scanOptions.scanIntensity
         }
       })
     });
     
     if (!response.ok) {
-      throw new Error('Failed to start scan');
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail || 'Failed to start scan');
     }
     
     const data = await response.json();
+    const scanId = data.scan_id;
     
     // Create a new scan entry
     const newScan = {
-      id: data.scan_id,
+      id: scanId,
       status: 'running',
       startTime: new Date().toISOString(),
       endTime: null,
       results: null,
-      error: null
+      error: null,
+      type: scanType,
+      scanners: selectedScanners,
+      findings: []
     };
     
+    if (!isScanning.value || !activeScan.value) return;
     // Add to history and set as active
     scanHistory.value.unshift(newScan);
     activeScan.value = newScan;
     
-    // Poll for updates
+    // Start polling for updates
     pollScanStatus(data.scan_id);
     
-    toast.success('Security scan started');
+    toast.success(`Security ${scanType} scan started`);
     
   } catch (error) {
     console.error('Error starting scan:', error);
@@ -263,54 +372,72 @@ const startScan = async () => {
 };
 
 const pollScanStatus = async (scanId) => {
+  if (!isScanning.value) return;
+  
   try {
     const response = await fetch(`${apiBaseUrl}/api/scans/${scanId}`);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
     const data = await response.json();
     
-    // Update scan status
+    // Update scan status in history
     const scanIndex = scanHistory.value.findIndex(s => s.id === scanId);
-    if (scanIndex !== -1) {
-      const updatedScan = {
-        ...scanHistory.value[scanIndex],
-        status: data.status,
-        endTime: data.end_time || null,
-        results: data.results || null,
-        error: data.error || null
-      };
-      
-      scanHistory.value[scanIndex] = updatedScan;
-      
-      if (activeScan.value?.id === scanId) {
-        activeScan.value = updatedScan;
-      }
-      
-      // Update progress
-      if (data.status === 'running') {
-        // Simple progress simulation - in a real app, you'd get this from the API
-        const progress = Math.min(scanProgress.value + 10, 90);
-        scanProgress.value = progress;
-        
-        // Continue polling if still running
-        if (progress < 90) {
-          setTimeout(() => pollScanStatus(scanId), 2000);
-        } else {
-          // Final check after a delay
-          setTimeout(() => pollScanStatus(scanId), 1000);
+    if (scanIndex === -1) return;
+    
+    // Extract findings from results if available
+    const findings = [];
+    if (data.results) {
+      Object.entries(data.results).forEach(([scanner, result]) => {
+        if (result && result.findings) {
+          findings.push(...result.findings.map(finding => ({
+            ...finding,
+            scanner,
+            timestamp: new Date().toISOString()
+          })));
         }
-      } else if (data.status === 'completed') {
-        scanProgress.value = 100;
-        isScanning.value = false;
-        toast.success('Security scan completed');
-      } else if (data.status === 'failed') {
-        isScanning.value = false;
-        scanProgress.value = 0;
-        toast.error('Security scan failed');
-      }
+      });
     }
+    
+    const updatedScan = {
+      ...scanHistory.value[scanIndex],
+      status: data.status,
+      endTime: data.end_time || null,
+      results: data.results || null,
+      error: data.error || null,
+      findings: [...findings, ...(scanHistory.value[scanIndex].findings || [])]
+    };
+    
+    // Update the scan in history
+    scanHistory.value[scanIndex] = updatedScan;
+    
+    // Update active scan if it's the current one
+    if (activeScan.value?.id === scanId) {
+      activeScan.value = { ...updatedScan };
+    }
+    
+    // Update progress and handle status changes
+    if (data.status === 'running') {
+      // Continue polling
+      setTimeout(() => pollScanStatus(scanId), 2000);
+    } else if (data.status === 'completed') {
+      isScanning.value = false;
+      scanProgress.value = 100;
+      toast.success('Security scan completed');
+    } else if (data.status === 'failed') {
+      isScanning.value = false;
+      scanProgress.value = 0;
+      toast.error(data.error || 'Security scan failed');
+    }
+    
   } catch (error) {
     console.error('Error polling scan status:', error);
-    // Retry after a delay
-    setTimeout(() => pollScanStatus(scanId), 2000);
+    // Retry after a delay if we're still scanning
+    if (isScanning.value) {
+      setTimeout(() => pollScanStatus(scanId), 2000);
+    }
   }
 };
 
@@ -372,21 +499,26 @@ const formatDuration = (startTime, endTime) => {
 onMounted(async () => {
   try {
     const response = await fetch(`${apiBaseUrl}/api/scans`);
-    if (response.ok) {
-      const data = await response.json();
-      scanHistory.value = data.map(scan => ({
-        id: scan.scan_id,
-        status: scan.status,
-        startTime: scan.start_time,
-        endTime: scan.end_time,
-        results: scan.results ? scan.results.results || [] : null,
-        error: scan.error
-      }));
-      
-      // Set the most recent scan as active if there is one
-      if (scanHistory.value.length > 0) {
-        activeScan.value = { ...scanHistory.value[0] };
-      }
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    scanHistory.value = data.map(scan => ({
+      id: scan.scan_id,
+      status: scan.status,
+      startTime: scan.start_time,
+      endTime: scan.end_time,
+      results: scan.results || null,
+      error: scan.error || null,
+      findings: [],
+      type: scan.type || 'unknown',
+      scanners: scan.scanners || []
+    }));
+    
+    // Set the most recent scan as active if there is one
+    if (scanHistory.value.length > 0) {
+      activeScan.value = { ...scanHistory.value[0] };
     }
   } catch (error) {
     console.error('Error loading scan history:', error);

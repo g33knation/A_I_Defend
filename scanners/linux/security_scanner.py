@@ -29,7 +29,7 @@ try:
     import yaml
 except ImportError:
     yaml = None
-    print("Warning: pyyaml not installed. Some features may be limited.")
+    # Suppress warning - will be logged in errors if needed
 
 # Make magic import optional
 try:
@@ -37,19 +37,25 @@ try:
     MAGIC_AVAILABLE = True
 except ImportError:
     MAGIC_AVAILABLE = False
-    print("Warning: python-magic-bin not installed. File type detection will be limited.")
+    # Suppress warning - will be logged in errors if needed
 
 import yara
 
 # Import base scanner
 import sys
 
-# Add the project root to the Python path
+# Add the project root and scanners directory to the Python path
 project_root = Path(__file__).parent.parent.parent
+scanners_dir = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
+if str(scanners_dir) not in sys.path:
+    sys.path.insert(0, str(scanners_dir))
 
-from scanners.base_scanner import BaseScanner
+try:
+    from scanners.base_scanner import BaseScanner
+except ImportError:
+    from base_scanner import BaseScanner
 
 class SecurityScanner(BaseScanner):
     """Comprehensive security scanner for Linux systems."""
@@ -58,7 +64,7 @@ class SecurityScanner(BaseScanner):
         """Initialize the security scanner with configuration."""
         super().__init__(config)
         self.temp_dir = tempfile.mkdtemp(prefix="security_scan_")
-        self.api_url = self.config.get("api_url", "http://localhost:8000/api/events")
+        self.api_url = self.config.get("api_url", "http://backend:8000/events")
         
         # Initialize YARA rules if configured
         self.yara_rules = None
@@ -79,7 +85,8 @@ class SecurityScanner(BaseScanner):
             ])
             
             for scanner_name in scanners:
-                if scanner_name in self.config:
+                # Check if the scanner method exists
+                if hasattr(self, f"scan_{scanner_name}"):
                     try:
                         scanner_method = getattr(self, f"scan_{scanner_name}")
                         if asyncio.iscoroutinefunction(scanner_method):
@@ -91,6 +98,8 @@ class SecurityScanner(BaseScanner):
                             )
                     except Exception as e:
                         self.errors.append(f"Error in {scanner_name} scan: {str(e)}")
+                else:
+                    self.errors.append(f"Scanner method 'scan_{scanner_name}' not found")
             
             return True
             
@@ -106,9 +115,12 @@ class SecurityScanner(BaseScanner):
     
     async def scan_nmap(self):
         """Run Nmap network scan."""
-        targets = self.config.get("nmap", {}).get("targets", ["127.0.0.1"])
+        # Default to scanning common network ranges or specific targets
+        default_targets = self.config.get("scan_mode") == "network" and ["192.168.1.0/24"] or ["127.0.0.1"]
+        targets = self.config.get("nmap", {}).get("targets", default_targets)
         ports = self.config.get("nmap", {}).get("ports", "1-1000")
-        args = self.config.get("nmap", {}).get("arguments", "-T4 -A -v")
+        # Use safer scan arguments for network scanning
+        args = self.config.get("nmap", {}).get("arguments", "-T4 -sV")
         
         for target in targets:
             output_file = os.path.join(self.temp_dir, f"nmap_{target.replace('.', '_')}.xml")
@@ -484,21 +496,26 @@ class SecurityScanner(BaseScanner):
         event = {
             "source": source,
             "type": event_type,
-            "timestamp": datetime.utcnow().isoformat(),
-            "data": data
+            "payload": data
         }
         
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(
                     self.api_url,
-                    json=event,
-                    timeout=30
+                    json=event
                 )
                 if response.status_code >= 400:
-                    self.errors.append(f"Failed to post event: {response.text}")
+                    self.errors.append(f"Failed to post event to {self.api_url}: HTTP {response.status_code} - {response.text}")
+                elif response.status_code == 200:
+                    # Successfully posted
+                    pass
+        except httpx.TimeoutException as e:
+            self.errors.append(f"Timeout posting event to {self.api_url}: {str(e)}")
+        except httpx.ConnectError as e:
+            self.errors.append(f"Connection error posting event to {self.api_url}: {str(e)}")
         except Exception as e:
-            self.errors.append(f"Error posting event: {str(e)}")
+            self.errors.append(f"Error posting event to {self.api_url}: {type(e).__name__}: {str(e)}")
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert scan results to a dictionary."""

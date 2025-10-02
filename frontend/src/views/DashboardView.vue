@@ -5,6 +5,16 @@ import SecurityScanner from '@/components/SecurityScanner.vue';
 
 const store = useDefenseStore();
 
+// API Base URL - dynamically determine based on current location
+const getApiBaseUrl = () => {
+  if (window.location.port === '8001') {
+    return 'http://localhost:8000';
+  }
+  return window.location.origin;
+};
+
+const apiBaseUrl = getApiBaseUrl();
+
 // System status data
 const systemStatus = ref([
   { name: 'Web Server', status: 'operational' },
@@ -162,11 +172,20 @@ const refreshData = async () => {
 
 const runQuickScan = async () => {
   try {
-    // This would call your backend to start a quick scan
-    const response = await fetch('http://localhost:8000/api/scan/quick', {
-      method: 'POST'
+    // Call the backend to start a quick scan with default scanners
+    const response = await fetch(`${apiBaseUrl}/api/scans/start`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        scanners: ['nmap', 'lynis', 'clamav'],
+        config: {}
+      })
     });
     if (response.ok) {
+      const data = await response.json();
+      console.log('Scan started:', data);
       lastScanTime.value = 'Just now';
       // Refresh data after a short delay to get scan results
       setTimeout(refreshData, 3000);
@@ -195,26 +214,15 @@ onMounted(() => {
         <h1 class="text-3xl font-bold text-gray-800">Security Dashboard</h1>
         <p class="text-gray-600">Overview of your system's security status</p>
       </div>
-      <div class="flex flex-wrap gap-2">
-        <button 
-          @click="refreshData" 
-          class="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd" />
-          </svg>
-          Refresh Data
-        </button>
-        <button 
-          @click="runQuickScan" 
-          class="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd" d="M4 5a2 2 0 00-2 2v8a2 2 0 002 2h12a2 2 0 002-2V7a2 2 0 00-2-2h-1.586a1 1 0 01-.707-.293l-1.121-1.121A2 2 0 0011.172 3H8.828a2 2 0 00-1.414.586L6.293 4.707A1 1 0 015.586 5H4zm6 9a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd" />
-          </svg>
-          Quick Scan
-        </button>
-      </div>
+      <button 
+        @click="refreshData" 
+        class="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+          <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd" />
+        </svg>
+        Refresh Data
+      </button>
     </div>
     
     <!-- Navigation Tabs -->
@@ -243,67 +251,67 @@ onMounted(() => {
     <!-- Dashboard View -->
     <div v-else>
       <!-- Stats Cards -->
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <div class="flex gap-6 mb-8">
         <!-- Total Events -->
-        <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition-shadow">
+        <div class="flex-1 bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition-shadow">
           <div class="flex items-center">
             <div class="p-3 rounded-full bg-blue-50 text-blue-600">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-            </svg>
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+              </svg>
+            </div>
+            <div class="ml-4">
+              <p class="text-sm font-medium text-gray-500">Total Events</p>
+              <p class="text-2xl font-semibold text-gray-900">{{ store.stats.totalEvents || 0 }}</p>
+            </div>
           </div>
-          <div class="ml-4">
-            <p class="text-sm font-medium text-gray-500">Total Events</p>
-            <p class="text-2xl font-semibold text-gray-900">{{ store.stats.totalEvents || 0 }}</p>
+        </div>
+        
+        <!-- Open Detections -->
+        <div class="flex-1 bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition-shadow">
+          <div class="flex items-center">
+            <div class="p-3 rounded-full bg-yellow-50 text-yellow-600">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <div class="ml-4">
+              <p class="text-sm font-medium text-gray-500">Open Detections</p>
+              <p class="text-2xl font-semibold text-gray-900">{{ store.stats.openDetections || 0 }}</p>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Threats Blocked -->
+        <div class="flex-1 bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition-shadow">
+          <div class="flex items-center">
+            <div class="p-3 rounded-full bg-red-50 text-red-600">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <div class="ml-4">
+              <p class="text-sm font-medium text-gray-500">Threats Blocked</p>
+              <p class="text-2xl font-semibold text-gray-900">{{ store.stats.threatsBlocked || 0 }}</p>
+            </div>
+          </div>
+        </div>
+        
+        <!-- False Positives -->
+        <div class="flex-1 bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition-shadow">
+          <div class="flex items-center">
+            <div class="p-3 rounded-full bg-green-50 text-green-600">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <div class="ml-4">
+              <p class="text-sm font-medium text-gray-500">False Positives</p>
+              <p class="text-2xl font-semibold text-gray-900">{{ store.stats.falsePositives || 0 }}</p>
+            </div>
           </div>
         </div>
       </div>
-      
-      <!-- Open Detections -->
-      <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition-shadow">
-        <div class="flex items-center">
-          <div class="p-3 rounded-full bg-yellow-50 text-yellow-600">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-          </div>
-          <div class="ml-4">
-            <p class="text-sm font-medium text-gray-500">Open Detections</p>
-            <p class="text-2xl font-semibold text-gray-900">{{ store.stats.openDetections || 0 }}</p>
-          </div>
-        </div>
-      </div>
-      
-      <!-- Threats Blocked -->
-      <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition-shadow">
-        <div class="flex items-center">
-          <div class="p-3 rounded-full bg-red-50 text-red-600">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-          </div>
-          <div class="ml-4">
-            <p class="text-sm font-medium text-gray-500">Threats Blocked</p>
-            <p class="text-2xl font-semibold text-gray-900">{{ store.stats.threatsBlocked || 0 }}</p>
-          </div>
-        </div>
-      </div>
-      
-      <!-- False Positives -->
-      <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition-shadow">
-        <div class="flex items-center">
-          <div class="p-3 rounded-full bg-green-50 text-green-600">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-            </svg>
-          </div>
-          <div class="ml-4">
-            <p class="text-sm font-medium text-gray-500">False Positives</p>
-            <p class="text-2xl font-semibold text-gray-900">{{ store.stats.falsePositives || 0 }}</p>
-          </div>
-        </div>
-      </div>
-    </div>
 
     <!-- Activity and System Status -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">

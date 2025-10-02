@@ -1,6 +1,7 @@
 import os
 import sys
 from pathlib import Path
+import json
 
 # Add the backend directory to the Python path
 backend_dir = str(Path(__file__).parent.parent)
@@ -14,64 +15,27 @@ import asyncpg
 import httpx
 
 # Import routers
-from app.routers import scans
+from app.routers import scans, agents
 
 # Create FastAPI app
 app = FastAPI(title="Defense AI Backend")
 
-# CORS configuration
-origins = [
-    "http://localhost:8001",
-    "http://localhost:5173",
-    "http://127.0.0.1:8001",
-    "http://127.0.0.1:5173",
-]
-
-# Add CORS middleware
+# CORS configuration - allow all origins for development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"],  # Allow all origins for development
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["*"],
 )
 
-# Add CORS headers middleware
-@app.middleware("http")
-async def add_cors_headers(request: Request, call_next):
-    # Handle preflight requests
-    if request.method == "OPTIONS":
-        origin = request.headers.get("Origin", "")
-        if origin in origins:
-            response = Response(
-                status_code=204,
-                headers={
-                    "Access-Control-Allow-Origin": origin,
-                    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-                    "Access-Control-Allow-Credentials": "true",
-                    "Access-Control-Max-Age": "600",
-                },
-            )
-            return response
-
-    # Process the request
-    response = await call_next(request)
-    
-    # Add CORS headers to all responses
-    origin = request.headers.get("Origin")
-    if origin in origins:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Expose-Headers"] = "Content-Type, Authorization"
-    
-    return response
+# CORS is now handled by the CORSMiddleware above
 
 # Database configuration
 DB_USER = "postgres"
 DB_PASSWORD = "changeit"
-DB_HOST = "localhost"
+DB_HOST = "db"  # Use the service name from docker-compose.yml
 DB_PORT = "5432"  # Using default PostgreSQL port
 DB_NAME = "defense"
 
@@ -140,15 +104,65 @@ async def list_events():
 @app.post("/events")
 async def ingest_event(event: EventIn):
     """Ingest a new security event."""
+    print(f"Received event: source={event.source}, type={event.type}")
     try:
         async with app.state.pool.acquire() as conn:
-            await conn.execute(
+            # Insert the event and get its ID
+            event_id = await conn.fetchval(
                 """
                 INSERT INTO events (source, type, payload, created_at)
                 VALUES ($1, $2, $3, NOW())
+                RETURNING id
                 """,
-                event.source, event.type, event.payload
+                event.source, event.type, json.dumps(event.payload)
             )
+            print(f"Event inserted with ID: {event_id}")
+            
+            # Create a detection for certain event types
+            severity_map = {
+                'malware_detected': 0.9,
+                'rootkit_scan': 0.8,
+                'ids_alert': 0.85,
+                'security_audit': 0.6,
+                'port_scan': 0.3
+            }
+            
+            category_map = {
+                'malware_detected': 'malware',
+                'rootkit_scan': 'rootkit',
+                'ids_alert': 'intrusion',
+                'security_audit': 'vulnerability',
+                'port_scan': 'reconnaissance'
+            }
+            
+            if event.type in severity_map:
+                score = severity_map[event.type]
+                category = category_map.get(event.type, 'unknown')
+                summary = f"{event.source}: {event.type}"
+                
+                # Extract more details from payload if available
+                if 'details' in event.payload:
+                    details = event.payload['details']
+                    if isinstance(details, dict):
+                        if 'infected_files' in details:
+                            summary = f"Malware detected: {len(details['infected_files'])} infected files"
+                        elif 'warnings' in details and details['warnings']:
+                            summary = f"Security warnings: {len(details['warnings'])} issues found"
+                        elif 'alerts' in details:
+                            summary = f"IDS alerts: {len(details['alerts'])} threats detected"
+                        elif 'ports' in details:
+                            summary = f"Port scan: {len(details['ports'])} ports found on {details.get('address', 'target')}"
+                
+                detection_id = await conn.fetchval(
+                    """
+                    INSERT INTO detections (event_id, summary, score, adjusted_score, category, ai_output, created_at)
+                    VALUES ($1, $2, $3, $3, $4, $5, NOW())
+                    RETURNING id
+                    """,
+                    event_id, summary, score, category, json.dumps(event.payload)
+                )
+                print(f"Detection created with ID: {detection_id}")
+        
         return {"status": "received", "event": event.dict()}
     except Exception as e:
         print(f"Error ingesting event: {e}")
@@ -156,6 +170,7 @@ async def ingest_event(event: EventIn):
 
 # Include API routers
 app.include_router(scans.router)
+app.include_router(agents.router)
 
 @app.get("/detections")
 async def list_detections():
