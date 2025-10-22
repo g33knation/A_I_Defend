@@ -95,6 +95,7 @@ export const useDefenseStore = defineStore('defense', () => {
     stats,
     isLoading,
     error,
+    API_BASE,
     fetchEvents,
     fetchDetections,
     submitFeedback,

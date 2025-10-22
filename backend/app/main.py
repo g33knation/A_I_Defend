@@ -121,18 +121,42 @@ async def ingest_event(event: EventIn):
             # Create a detection for certain event types
             severity_map = {
                 'malware_detected': 0.9,
+                'clamav_scan': 0.9,
+                'yara_scan': 0.85,
                 'rootkit_scan': 0.8,
+                'chkrootkit_scan': 0.8,
+                'rkhunter_scan': 0.8,
                 'ids_alert': 0.85,
+                'suricata_scan': 0.85,
                 'security_audit': 0.6,
-                'port_scan': 0.3
+                'lynis_scan': 0.6,
+                'port_scan': 0.3,
+                'nmap_scan': 0.3,
+                'masscan_scan': 0.3,
+                'ping-sweep_scan': 0.2,
+                'arp-scan_scan': 0.2,
+                'tshark_scan': 0.4,
+                'dns-enum_scan': 0.2
             }
             
             category_map = {
                 'malware_detected': 'malware',
+                'clamav_scan': 'malware',
+                'yara_scan': 'malware',
                 'rootkit_scan': 'rootkit',
+                'chkrootkit_scan': 'rootkit',
+                'rkhunter_scan': 'rootkit',
                 'ids_alert': 'intrusion',
+                'suricata_scan': 'intrusion',
                 'security_audit': 'vulnerability',
-                'port_scan': 'reconnaissance'
+                'lynis_scan': 'vulnerability',
+                'port_scan': 'reconnaissance',
+                'nmap_scan': 'reconnaissance',
+                'masscan_scan': 'reconnaissance',
+                'ping-sweep_scan': 'reconnaissance',
+                'arp-scan_scan': 'reconnaissance',
+                'tshark_scan': 'reconnaissance',
+                'dns-enum_scan': 'reconnaissance'
             }
             
             if event.type in severity_map:
@@ -145,13 +169,62 @@ async def ingest_event(event: EventIn):
                     details = event.payload['details']
                     if isinstance(details, dict):
                         if 'infected_files' in details:
-                            summary = f"Malware detected: {len(details['infected_files'])} infected files"
+                            files = details['infected_files'][:3]  # First 3 files
+                            file_list = ', '.join(files)
+                            more = f" (+{len(details['infected_files'])-3} more)" if len(details['infected_files']) > 3 else ""
+                            summary = f"Malware detected: {file_list}{more}"
                         elif 'warnings' in details and details['warnings']:
-                            summary = f"Security warnings: {len(details['warnings'])} issues found"
+                            warnings = details['warnings'][:2]  # First 2 warnings
+                            warning_text = '; '.join([w.get('message', str(w)) for w in warnings if isinstance(w, dict)])
+                            more = f" (+{len(details['warnings'])-2} more)" if len(details['warnings']) > 2 else ""
+                            summary = f"Security warnings: {warning_text}{more}"
                         elif 'alerts' in details:
-                            summary = f"IDS alerts: {len(details['alerts'])} threats detected"
+                            alerts = details['alerts'][:2]
+                            alert_text = '; '.join([a.get('signature', str(a)) for a in alerts if isinstance(a, dict)])
+                            more = f" (+{len(details['alerts'])-2} more)" if len(details['alerts']) > 2 else ""
+                            summary = f"IDS alerts: {alert_text}{more}"
                         elif 'ports' in details:
-                            summary = f"Port scan: {len(details['ports'])} ports found on {details.get('address', 'target')}"
+                            ports = details['ports']
+                            address = details.get('address', 'target')
+                            # Format port list
+                            if len(ports) <= 5:
+                                port_list = ', '.join([f"{p.get('port', p)}/{p.get('protocol', 'tcp')}" if isinstance(p, dict) else str(p) for p in ports])
+                                summary = f"Port scan on {address}: {port_list}"
+                            else:
+                                port_list = ', '.join([f"{p.get('port', p)}/{p.get('protocol', 'tcp')}" if isinstance(p, dict) else str(p) for p in ports[:5]])
+                                summary = f"Port scan on {address}: {port_list} (+{len(ports)-5} more)"
+                        elif 'live_hosts' in details:
+                            # Ping sweep results
+                            hosts = details['live_hosts']
+                            network = event.payload.get('network', 'network')
+                            if len(hosts) <= 5:
+                                host_list = ', '.join(hosts)
+                                summary = f"Ping sweep on {network}: {len(hosts)} live hosts ({host_list})"
+                            else:
+                                host_list = ', '.join(hosts[:5])
+                                summary = f"Ping sweep on {network}: {len(hosts)} live hosts ({host_list} +{len(hosts)-5} more)"
+                        elif 'hosts' in details:
+                            # ARP scan results
+                            hosts = details['hosts']
+                            interface = details.get('interface', 'network')
+                            if len(hosts) <= 5:
+                                host_list = ', '.join([f"{h.get('ip', 'unknown')}" for h in hosts if isinstance(h, dict)])
+                                summary = f"ARP scan on {interface}: {len(hosts)} devices ({host_list})"
+                            else:
+                                host_list = ', '.join([f"{h.get('ip', 'unknown')}" for h in hosts[:5] if isinstance(h, dict)])
+                                summary = f"ARP scan on {interface}: {len(hosts)} devices ({host_list} +{len(hosts)-5} more)"
+                        elif 'unique_ips' in details:
+                            # Tshark results
+                            ips = details['unique_ips']
+                            protocols = details.get('protocols', {})
+                            proto_summary = ', '.join([f"{k}: {v}" for k, v in list(protocols.items())[:3]])
+                            summary = f"Traffic analysis: {len(ips)} unique IPs, protocols: {proto_summary}"
+                        elif 'records' in details:
+                            # DNS enumeration results
+                            records = details['records']
+                            domain = event.payload.get('domain', 'domain')
+                            record_types = ', '.join(records.keys())
+                            summary = f"DNS enumeration on {domain}: {record_types}"
                 
                 detection_id = await conn.fetchval(
                     """
@@ -194,6 +267,14 @@ async def submit_feedback(fb: FeedbackIn):
             fb.feedback, fb.detection_id
         )
     return {"status": "ok"}
+
+@app.delete("/detections")
+async def purge_detections():
+    """Delete all detections."""
+    async with app.state.pool.acquire() as conn:
+        await conn.execute("DELETE FROM detection_feedback")
+        await conn.execute("DELETE FROM detections")
+    return {"status": "ok", "message": "All detections purged"}
 
 @app.post("/ask")
 async def ask_model(req: AskIn):

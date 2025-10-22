@@ -1,270 +1,143 @@
-# 🐙 AI Defend - Distributed Security Monitoring Platform
+# AI Defend - Distributed Security Monitoring Platform
 
-AI Defend is an **enterprise-grade security monitoring platform** designed with a distributed "octopus" architecture. It separates the control plane (brain) from scanner agents (tentacles) to provide secure, scalable security monitoring across networks and systems.
+Enterprise-grade security monitoring platform with distributed architecture for scalable network and system defense.
 
-## 🎯 Overview
+## Overview
 
-AI Defend implements a modern security architecture where:
-- **Control Plane (HEAD)**: Centralized management, AI/ML processing, and dashboard
-- **Scanner Agents (TENTACLES)**: Distributed security scanners deployed across network segments
-- **One-Way Data Flow**: Agents send data to the head, preventing lateral compromise
-- **Kubernetes-Ready**: Designed for cloud-native deployment and horizontal scaling
+AI Defend implements a distributed security architecture:
+- **Control Plane**: Centralized management, AI/ML processing, and dashboard
+- **Scanner Agents**: Distributed security scanners deployed across network segments
+- **One-Way Data Flow**: Agents send data to control plane, preventing lateral compromise
+- **Cloud-Native**: Kubernetes-ready for enterprise deployment
 
 ### Architecture Philosophy
 
-The platform is built on the principle of **isolation and containment**:
+Built on principles of **isolation and containment**:
 1. Scanner agents operate independently in isolated environments
-2. Control plane receives and processes security data without direct agent control
-3. Compromise of one component doesn't cascade to others
-4. Scalable design supports enterprise-wide deployment
+2. Control plane processes security data without direct agent control
+3. Component compromise doesn't cascade to others
+4. Horizontal scaling supports enterprise-wide deployment
 
 ---
 
-## 🏗️ Architecture
-
-### Distributed "Octopus" Design
-
-```
-┌─────────────────────────────────────┐
-│      CONTROL PLANE (HEAD)           │
-│  ┌──────────────────────────────┐   │
-│  │  Vue.js Dashboard            │   │
-│  │  - Real-time monitoring      │   │
-│  │  - Agent management          │   │
-│  │  - Detection review          │   │
-│  └──────────────────────────────┘   │
-│  ┌──────────────────────────────┐   │
-│  │  FastAPI Backend             │   │
-│  │  - Event processing          │   │
-│  │  - Agent coordination        │   │
-│  │  - AI/ML integration         │   │
-│  └──────────────────────────────┘   │
-│  ┌──────────────────────────────┐   │
-│  │  PostgreSQL + RabbitMQ       │   │
-│  └──────────────────────────────┘   │
-└─────────────────────────────────────┘
-              ▲
-              │ One-way data flow
-              │ (scan results only)
-    ┌─────────┴─────────┐
-    │                   │
-┌───▼────┐         ┌────▼───┐
-│ AGENT 1│         │ AGENT 2│
-│ Network│         │  Host  │
-│  Scan  │         │  Scan  │
-└────────┘         └────────┘
-```
-
-### Key Components
-
-**Control Plane**:
-- **Frontend**: Modern Vue.js dashboard with real-time updates
-- **Backend**: FastAPI with async processing
-- **Database**: PostgreSQL for events and detections
-- **Message Queue**: RabbitMQ for asynchronous task processing
-- **AI/ML**: Model server for intelligent threat analysis
-
-**Scanner Agents**:
-- **Agent Client**: Auto-registration and heartbeat system
-- **Security Scanners**: Nmap, Lynis, ClamAV, and more
-- **Result Reporting**: Automatic event submission to control plane
-
----
-
-## ✨ Features
+## Features
 
 ### Security Monitoring
-- **Network Scanning**: Discover hosts, services, and open ports
-- **Security Auditing**: System hardening and compliance checks
+- **Network Scanning**: Host discovery, service enumeration, port analysis
+- **Security Auditing**: System hardening and compliance validation
 - **Malware Detection**: File scanning and pattern matching
-- **Event Correlation**: AI-powered threat detection
-- **Real-time Alerts**: Immediate notification of security issues
+- **Event Correlation**: AI-powered threat analysis
+- **Real-time Alerts**: Immediate security event notification
 
 ### Agent Management
-- **Auto-Registration**: Agents automatically connect to control plane
-- **Health Monitoring**: Heartbeat-based agent status tracking
-- **Task Assignment**: Distribute scans across agents
-- **Load Balancing**: Intelligent workload distribution
-- **Scalability**: Deploy unlimited agents across your infrastructure
+- **Auto-Registration**: Agents connect automatically to control plane
+- **Health Monitoring**: Heartbeat-based status tracking
+- **Task Distribution**: Intelligent scan assignment across agents
+- **Load Balancing**: Workload optimization
+- **Scalability**: Deploy agents across infrastructure segments
 
 ### Dashboard & Reporting
-- **Real-time Dashboard**: Live security status overview
+- **Live Monitoring**: Real-time security status
 - **Event Timeline**: Historical security event tracking
-- **Detection Management**: Review and classify threats
-- **Agent Monitoring**: View all registered scanner agents
-- **Interactive Queries**: Ask AI about security events
-
-### Enterprise Features
-- **Kubernetes Support**: Deploy on K8s with provided manifests
-- **Horizontal Scaling**: Scale agents based on workload
-- **Multi-Region**: Deploy agents across geographic locations
-- **API-First**: RESTful API for integration
-- **Extensible**: Plugin architecture for custom scanners
+- **Detection Management**: Threat review and classification
+- **Agent Monitoring**: Registered scanner agent visibility
+- **AI Assistant**: Natural language security queries
 
 ---
 
-## 📦 Getting Started
+## Getting Started
 
 ### Prerequisites
 - Docker & Docker Compose
-- 4GB+ RAM
+- 4GB+ RAM recommended
 - Modern web browser
 
 ### Quick Start
 
-1. **Clone the repository**
 ```bash
+# Clone repository
 git clone https://github.com/g33knation/A_I_Defend.git
 cd A_I_Defend
-```
 
-2. **Start all services**
-```bash
+# Start all services
 docker-compose up -d --build
+
+# Access dashboard
+# Navigate to http://localhost:8001
 ```
 
-3. **Access the dashboard**
-- Open your browser to `http://localhost:8001`
-- Default view shows security dashboard with real-time stats
+### Initial Configuration
 
-4. **View registered agents**
-- Navigate to "Scanner Agents" (🐙 icon) in the sidebar
-- See your scanner agent automatically registered and sending heartbeats
-
-### First Scan
-
-1. **Quick Scan from Dashboard**
-   - Click "Run Quick Scan" button
-   - System executes network scan and displays results
-   - View detections in the "Detections" tab
-
-2. **Assign Scan to Agent**
-   - Go to "Scanner Agents" page
-   - Click "Assign Scan" on an idle agent
-   - Configure targets and scanners
-   - Monitor scan execution in real-time
+1. Access the web dashboard
+2. Navigate to "Scanner Agents" to view registered agents
+3. Assign scan tasks to agents via the UI
+4. Monitor results in "Detections" and "Events" views
 
 ---
 
-## 🎮 Usage
+## Usage
 
 ### Dashboard Navigation
 
-**Main Dashboard** (`/`)
-- Security overview with key metrics
-- Total events, open detections, threats blocked
-- Recent detections and events
-- Quick scan functionality
+- **Events**: Complete event timeline with filtering
+- **Detections**: Security threat review and classification
+- **Scanner Agents**: Agent health monitoring and task assignment
+- **Ask AI**: Natural language security analysis
 
-**Events** (`/events`)
-- Complete event timeline
-- Filter by type and search
-- Compact card view for easy scanning
+### Scanner Capabilities
 
-**Detections** (`/detections`)
-- Security threat detections
-- Review and classify findings
-- Mark as confirmed threat or false positive
-- Run manual scans
+**Network Intelligence**
+- Port scanning and service discovery
+- Traffic analysis and protocol detection
+- Network mapping and topology discovery
+- DNS enumeration
 
-**Scanner Agents** (`/agents`)
-- View all registered agents
-- Monitor agent health and status
-- Assign scan tasks to specific agents
-- Real-time heartbeat monitoring
+**Security Auditing**
+- System configuration analysis
+- Compliance validation
+- Rootkit detection
+- Security baseline verification
 
-**Ask AI** (`/ask`)
-- Query the AI about security events
-- Get intelligent analysis of threats
-- Natural language security insights
-
-### API Endpoints
-
-**Agent Management**
-```bash
-# List all agents
-GET /api/agents/
-
-# Register new agent
-POST /api/agents/register
-
-# Agent heartbeat
-POST /api/agents/heartbeat
-
-# Assign scan to agent
-POST /api/agents/{agent_id}/assign
-
-# Check agent health
-GET /api/agents/health/check
-```
-
-**Scan Management**
-```bash
-# Start a scan
-POST /api/scans/start
-
-# Get scan status
-GET /api/scans/{scan_id}
-
-# List all scans
-GET /api/scans/
-```
-
-**Events & Detections**
-```bash
-# List events
-GET /events
-
-# Submit event
-POST /events
-
-# List detections
-GET /detections
-
-# Submit feedback
-POST /feedback
-```
+**Malware Detection**
+- File signature scanning
+- Pattern matching
+- Behavioral analysis
 
 ---
 
-## 🔒 Security Model
+## Security Model
 
 ### Design Principles
 
-1. **Isolation**: Scanner agents operate in isolated environments
-2. **Least Privilege**: Minimal permissions for each component
-3. **One-Way Flow**: Data flows from agents to control plane only
-4. **Containment**: Compromise of one component doesn't affect others
-
-### Data Flow
-
-```
-Scanner Agent → Scan Execution → Results
-                                    ↓
-                              POST /events
-                                    ↓
-                            Backend Processing
-                                    ↓
-                          Database Storage
-                                    ↓
-                          Dashboard Display
-```
+1. **Isolation**: Agents operate in isolated environments
+2. **Least Privilege**: Minimal permissions per component
+3. **Unidirectional Flow**: Data flows from agents to control plane only
+4. **Containment**: Component compromise isolation
 
 ### Agent Security
 
-- Agents run with capability-based security (NET_ADMIN, NET_RAW)
-- Read-only access to host filesystems
+- Capability-based security model
+- Read-only filesystem access where applicable
 - No credential storage in agents
-- Assignment-based task model (pull, not push)
+- Pull-based task assignment model
+
+### Deployment Security
+
+- Change default credentials immediately
+- Use TLS for production deployments
+- Implement network segmentation
+- Regular security updates
+- Monitor agent activity logs
+- Restrict API access
 
 ---
 
-## 🚀 Deployment
+## Deployment
 
-### Docker Compose (Development)
+### Docker Compose
 
 ```bash
-# Start all services
+# Start services
 docker-compose up -d --build
 
 # View logs
@@ -272,160 +145,113 @@ docker-compose logs -f
 
 # Stop services
 docker-compose down
-
-# Scale scanner agents
-docker-compose up -d --scale scanner=3
 ```
 
-### Kubernetes (Production)
+### Kubernetes
 
 ```bash
-# Deploy to Kubernetes
+# Deploy agents
 kubectl apply -f k8s/scanner-deployment.yaml
 
-# Scale agents
+# Scale deployment
 kubectl scale deployment scanner-agent -n ai-defend --replicas=10
-
-# View agent pods
-kubectl get pods -n ai-defend -l app=scanner
-
-# View logs
-kubectl logs -f deployment/scanner-agent -n ai-defend
 ```
 
-### Environment Variables
+### Production Considerations
 
-**Backend**
-- `DATABASE_URL`: PostgreSQL connection string
-- `RABBITMQ_URL`: RabbitMQ connection string
-
-**Scanner Agent**
-- `API_URL`: Control plane API endpoint
-- `SCAN_MODE`: Operation mode (network, local, hybrid)
+- Configure persistent storage for PostgreSQL
+- Implement backup strategies
+- Use secrets management for credentials
+- Enable TLS/SSL for all communications
+- Configure resource limits
+- Implement monitoring and alerting
+- Regular security audits
 
 ---
 
-## 📊 Monitoring
+## Monitoring
 
-### Agent Health
+### Health Checks
 
-Agents send heartbeats every 30 seconds. The control plane:
-- Tracks last heartbeat timestamp
-- Marks agents as stale after 5 minutes of inactivity
-- Provides health check endpoint for monitoring
+- Agents send heartbeats every 30 seconds
+- Control plane tracks agent status
+- Stale detection after 5 minutes of inactivity
 
 ### Metrics
 
 **Control Plane**
-- Total registered agents
-- Active scans
-- Events processed per hour
-- Detections created
-- Agent health status
+- Registered agent count
+- Active scan count
+- Event processing rate
+- Detection creation rate
 
-**Scanner Agents**
-- Current status (idle, scanning, error)
+**Agents**
+- Current status
 - Scan completion rate
 - Error rate
-- Resource utilization
 
 ---
 
-## 🛠️ Development
+## Development
 
 ### Project Structure
 
 ```
 A_I_Defend/
-├── backend/              # FastAPI backend
-│   ├── app/
-│   │   ├── main.py      # Main application
-│   │   └── routers/     # API routes
-│   │       ├── scans.py # Scan management
-│   │       └── agents.py# Agent management
-│   └── Dockerfile
-├── frontend/            # Vue.js dashboard
-│   ├── src/
-│   │   ├── views/       # Page components
-│   │   ├── stores/      # State management
-│   │   └── router/      # Routing
-│   └── Dockerfile
-├── scanners/            # Scanner agents
-│   ├── agent_client.py  # Agent client
-│   ├── linux/
-│   │   └── security_scanner.py
-│   └── Dockerfile
-├── k8s/                 # Kubernetes manifests
-│   └── scanner-deployment.yaml
-└── docker-compose.yml   # Docker Compose config
+├── backend/              # FastAPI control plane
+├── frontend/             # Vue.js dashboard
+├── scanners/             # Scanner agent implementations
+├── k8s/                  # Kubernetes manifests
+└── docker-compose.yml    # Development orchestration
 ```
 
-### Adding Custom Scanners
+### Extending Functionality
 
-1. Create scanner implementation in `scanners/`
-2. Add scanner method to `SecurityScanner` class
-3. Register scanner capability in agent client
-4. Update frontend to support new scanner type
-
----
-
-## 🤝 Contributing
-
-This is an experimental platform for security research and education. Contributions are welcome!
-
-### Guidelines
-- Follow existing code structure
-- Add tests for new features
-- Update documentation
-- Consider security implications
+1. Implement scanner in `scanners/` directory
+2. Register capability in agent client
+3. Update frontend for new scanner type
+4. Test thoroughly before deployment
 
 ---
 
-## 📝 License
+## Legal & Compliance
 
-This project is for educational and research purposes. Use responsibly and in accordance with applicable laws and regulations.
+### Authorization Requirements
 
----
+**You must have explicit authorization before scanning any network or system.**
 
-## ⚠️ Disclaimer
+- Obtain written permission for all scan targets
+- Comply with organizational security policies
+- Follow applicable laws and regulations
+- Document all scanning activities
+- Maintain audit logs
 
-AI Defend is a security monitoring platform designed for authorized use only. Users are responsible for:
-- Obtaining proper authorization before scanning networks
-- Complying with applicable laws and regulations
-- Using the platform ethically and responsibly
-- Securing their deployment appropriately
+### Responsible Use
 
-The developers are not responsible for misuse of this platform.
+- Only scan authorized networks and systems
+- Respect privacy and data protection laws
+- Use appropriate scan intensity
+- Schedule scans during approved windows
+- Report vulnerabilities responsibly
 
----
+### Disclaimer
 
-## 🔮 Roadmap
+This platform is for authorized security monitoring only. Users are solely responsible for:
+- Obtaining proper authorization
+- Legal compliance
+- Ethical use
+- Deployment security
 
-- [ ] Enhanced AI/ML threat detection models
-- [ ] Multi-tenancy support
-- [ ] Advanced reporting and analytics
-- [ ] Integration with SIEM platforms
-- [ ] Automated response capabilities
-- [ ] Mobile dashboard application
-- [ ] Cloud provider integrations
-- [ ] Compliance framework mapping
-
----
-
-## 📚 Additional Documentation
-
-- [Architecture Details](ARCHITECTURE.md) - Deep dive into system design
-- [Scanner Documentation](scanners/README.md) - Scanner implementation guide
-- [API Reference](http://localhost:8000/docs) - Interactive API documentation
+Developers assume no liability for misuse.
 
 ---
 
-## 💬 Support
+## Support
 
-For questions, issues, or contributions:
-- GitHub Issues: Report bugs and request features
-- Discussions: Ask questions and share ideas
+- **Issues**: Report bugs via GitHub Issues
+- **Documentation**: See project wiki
+- **Security**: Report vulnerabilities privately
 
 ---
 
-**Built with 🐙 by the AI Defend Team**
+**AI Defend Team**

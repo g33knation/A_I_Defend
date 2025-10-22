@@ -1,8 +1,10 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 import uuid
+import json
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
 
@@ -22,6 +24,7 @@ class AgentHeartbeat(BaseModel):
     status: str  # "idle", "scanning", "error"
     current_task: Optional[str] = None
     metrics: Dict[str, Any] = {}
+    status_update_only: bool = False
 
 class ScanAssignment(BaseModel):
     targets: List[str]
@@ -37,7 +40,12 @@ class AgentInfo(BaseModel):
     status: str
     last_heartbeat: datetime
     registered_at: datetime
-    current_assignment: Optional[Dict[str, Any]] = None
+    current_assignment: Optional[str] = None  # Assignment ID, not dict
+    metrics: Optional[Dict[str, Any]] = None
+    
+    class Config:
+        # Ensure None values are included in JSON response
+        use_enum_values = True
 
 @router.post("/register", response_model=Dict[str, str])
 async def register_agent(registration: AgentRegistration):
@@ -55,7 +63,8 @@ async def register_agent(registration: AgentRegistration):
         "status": "idle",
         "last_heartbeat": datetime.utcnow(),
         "registered_at": datetime.utcnow(),
-        "current_assignment": None
+        "current_assignment": None,
+        "metrics": None
     }
     
     print(f"Agent registered: {agent_id} ({registration.hostname})")
@@ -77,11 +86,19 @@ async def agent_heartbeat(heartbeat: AgentHeartbeat):
         "status": heartbeat.status,
         "last_heartbeat": datetime.utcnow(),
         "current_task": heartbeat.current_task,
-        "metrics": heartbeat.metrics
+        "metrics": heartbeat.metrics,
     })
-    
-    # Check if there's a pending assignment
-    assignment = agent_assignments.get(heartbeat.agent_id)
+    agents[heartbeat.agent_id]["current_assignment"] = heartbeat.current_task
+
+    assignment = None
+
+    if not heartbeat.status_update_only:
+        # Check if there's a pending assignment
+        assignment = agent_assignments.get(heartbeat.agent_id)
+        
+        # Clear the assignment after sending it (agent will process it)
+        if assignment and heartbeat.agent_id in agent_assignments:
+            del agent_assignments[heartbeat.agent_id]
     
     return {
         "status": "ok",
@@ -89,10 +106,32 @@ async def agent_heartbeat(heartbeat: AgentHeartbeat):
         "timestamp": datetime.utcnow().isoformat()
     }
 
-@router.get("/", response_model=List[AgentInfo])
+@router.get("/")
 async def list_agents():
     """List all registered agents."""
-    return [AgentInfo(**agent) for agent in agents.values()]
+    # Return raw agent data to ensure metrics field is always included
+    agent_list = []
+    for agent in agents.values():
+        print(f"DEBUG: Agent keys: {agent.keys()}")
+        print(f"DEBUG: Metrics value: {agent.get('metrics')}")
+        agent_data = {
+            "agent_id": agent["agent_id"],
+            "hostname": agent["hostname"],
+            "ip_address": agent["ip_address"],
+            "capabilities": agent["capabilities"],
+            "status": agent["status"],
+            "last_heartbeat": agent["last_heartbeat"].isoformat(),
+            "registered_at": agent["registered_at"].isoformat(),
+            "current_assignment": agent.get("current_assignment"),
+            "metrics": agent.get("metrics")  # Explicitly include metrics
+        }
+        print(f"DEBUG: agent_data keys: {agent_data.keys()}")
+        print(f"DEBUG: agent_data metrics: {agent_data['metrics']}")
+        agent_list.append(agent_data)
+    # Manually serialize to ensure None values are included
+    json_str = json.dumps(agent_list, default=str)
+    print(f"DEBUG: JSON string: {json_str[:500]}")
+    return JSONResponse(content=json.loads(json_str))
 
 @router.get("/{agent_id}", response_model=AgentInfo)
 async def get_agent(agent_id: str):

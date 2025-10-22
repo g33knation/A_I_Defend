@@ -52,6 +52,53 @@ services:
     ports:
       - "8001:80"
 
+  # Network Intelligence Agent (Passive + Active Scanning)
+  # No credentials needed - uses network protocols only
+  network-intel:
+    build: ./scanners
+    container_name: network-intel
+    depends_on:
+      - backend
+    environment:
+      - API_URL=http://backend:8000
+      - AGENT_TYPE=network_intel
+    command: ["python", "-u", "/app/specialized_agent.py", "network_intel"]
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    restart: unless-stopped
+
+  # Malware Scanner Agent
+  malware-scanner:
+    build: ./scanners
+    container_name: malware-scanner
+    depends_on:
+      - backend
+    environment:
+      - API_URL=http://backend:8000
+      - AGENT_TYPE=malware
+    command: ["python", "-u", "/app/specialized_agent.py", "malware"]
+    volumes:
+      - /tmp:/scan/tmp:ro
+      - /var/log:/scan/var/log:ro
+    restart: unless-stopped
+
+  # Security Audit Scanner Agent
+  security-scanner:
+    build: ./scanners
+    container_name: security-scanner
+    depends_on:
+      - backend
+    environment:
+      - API_URL=http://backend:8000
+      - AGENT_TYPE=security_audit
+    command: ["python", "-u", "/app/specialized_agent.py", "security_audit"]
+    volumes:
+      - /etc:/etc:ro
+      - /var/log:/var/log:ro
+    restart: unless-stopped
+
+  # Legacy all-in-one scanner (optional, can be removed)
   scanner:
     build: ./scanners
     container_name: scanner
@@ -59,16 +106,16 @@ services:
       - backend
     environment:
       - API_URL=http://backend:8000/events
-      - SCAN_MODE=network  # Can be: network, local, hybrid
+      - SCAN_MODE=network
     volumes:
       - /etc:/etc:ro
       - /var/log:/var/log:ro
-    # Note: network_mode: host breaks container DNS
-    # For network scanning, use cap_add instead
     cap_add:
       - NET_ADMIN
       - NET_RAW
     restart: unless-stopped
+    profiles:
+      - legacy  # Only start with --profile legacy
 
   clamav:
     image: clamav/clamav:latest

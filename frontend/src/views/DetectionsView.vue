@@ -7,8 +7,7 @@ const searchQuery = ref('');
 const selectedStatus = ref('all');
 const currentPage = ref(1);
 const itemsPerPage = 10;
-const isScanning = ref(false);
-const scanStatus = ref('');
+const expandedDetections = ref(new Set());
 
 const statusOptions = [
   { value: 'all', label: 'All Statuses' },
@@ -57,62 +56,21 @@ const submitFeedback = async (detectionId, feedback) => {
   await store.fetchDetections();
 };
 
-const runManualScan = async () => {
+const purgeDetections = async () => {
+  if (!confirm('Are you sure you want to delete ALL detections? This cannot be undone.')) {
+    return;
+  }
   try {
-    isScanning.value = true;
-    scanStatus.value = 'Starting manual scan...';
-    
-    const response = await fetch(`${store.API_BASE}/scans/start`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        scanners: ["nmap", "lynis", "clamav", "chkrootkit", "rkhunter", "yara", "suricata"]
-      })
+    const response = await fetch('http://localhost:8000/detections', {
+      method: 'DELETE'
     });
-    
-    if (!response.ok) {
-      throw new Error('Failed to start scan');
+    if (response.ok) {
+      await store.fetchDetections();
+      alert('All detections have been purged');
     }
-    
-    const { scan_id } = await response.json();
-    scanStatus.value = 'Scan in progress...';
-    
-    // Poll for scan completion
-    let attempts = 0;
-    const maxAttempts = 60; // 5 minutes max (5 seconds * 60 = 300 seconds)
-    
-    while (attempts < maxAttempts) {
-      await new Promise(resolve => setTimeout(resolve, 5000)); // Check every 5 seconds
-      
-      const statusResponse = await fetch(`${store.API_BASE}/scans/${scan_id}`);
-      const statusData = await statusResponse.json();
-      
-      if (statusData.status === 'completed') {
-        scanStatus.value = 'Scan completed! Refreshing detections...';
-        await store.fetchDetections();
-        break;
-      } else if (statusData.status === 'failed') {
-        throw new Error(statusData.error || 'Scan failed');
-      }
-      
-      attempts++;
-    }
-    
-    if (attempts >= maxAttempts) {
-      throw new Error('Scan timed out');
-    }
-    
-  } catch (error) {
-    console.error('Error running manual scan:', error);
-    scanStatus.value = `Error: ${error.message}`;
-  } finally {
-    isScanning.value = false;
-    // Clear status after 5 seconds
-    setTimeout(() => {
-      scanStatus.value = '';
-    }, 5000);
+  } catch (err) {
+    console.error('Error purging detections:', err);
+    alert('Failed to purge detections');
   }
 };
 
@@ -137,18 +95,30 @@ const getStatusLabel = (status) => {
   }
 };
 
+const toggleDetails = (detectionId) => {
+  if (expandedDetections.value.has(detectionId)) {
+    expandedDetections.value.delete(detectionId);
+  } else {
+    expandedDetections.value.add(detectionId);
+  }
+};
+
+const isExpanded = (detectionId) => {
+  return expandedDetections.value.has(detectionId);
+};
+
 onMounted(() => {
   store.fetchDetections();
 });
 </script>
 
 <template>
-  <div class="p-6 max-w-7xl mx-auto">
+  <div class="p-4 max-w-[1600px] mx-auto">
     <!-- Header -->
-    <div class="flex items-center justify-between mb-6">
+    <div class="flex items-center justify-between mb-4">
       <div>
-        <h1 class="text-3xl font-bold text-gray-800">Threat Detections</h1>
-        <p class="text-gray-600 mt-1">{{ filteredDetections.length }} detections</p>
+        <h1 class="text-2xl font-bold text-gray-800">Threat Detections</h1>
+        <p class="text-xs text-gray-600 mt-0.5">{{ filteredDetections.length }} detections</p>
         <p v-if="scanStatus" class="text-sm text-blue-600 mt-1">{{ scanStatus }}</p>
       </div>
       <div class="flex gap-3">
@@ -172,59 +142,211 @@ onMounted(() => {
           </option>
         </select>
         <button
-          @click="runManualScan"
-          :disabled="isScanning"
-          class="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+          @click="purgeDetections"
+          class="px-4 py-2 text-sm font-medium rounded-lg text-white bg-red-600 hover:bg-red-700 transition-colors"
         >
-          <svg v-if="isScanning" class="animate-spin -ml-1 mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-          </svg>
-          {{ isScanning ? 'Scanning...' : 'Run Scan' }}
+          Purge All
         </button>
       </div>
     </div>
 
     <!-- Detections Grid -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
       <div 
         v-for="detection in paginatedDetections" 
         :key="detection.id" 
-        class="bg-white rounded-lg border border-gray-200 p-4 hover:shadow-md transition-shadow"
+        class="bg-white rounded-lg border border-gray-200 p-2 hover:shadow-md transition-shadow"
       >
-        <div class="flex items-start justify-between mb-3">
-          <div class="flex-1">
-            <h3 class="font-semibold text-gray-900 text-sm mb-1">{{ detection.summary || detection.type || 'Detection' }}</h3>
-            <p class="text-xs text-gray-500">{{ formatDate(detection.created_at) }}</p>
+        <div class="flex items-start justify-between mb-1.5">
+          <div class="flex-1 min-w-0">
+            <h3 class="font-semibold text-gray-900 text-[10px] mb-0.5 truncate">{{ detection.summary || detection.type || 'Detection' }}</h3>
+            <p class="text-[9px] text-gray-500">{{ formatDate(detection.detected_at || detection.created_at) }}</p>
           </div>
-          <span class="px-2 py-1 text-xs font-medium rounded-full" :class="getStatusBadgeClass(detection.feedback)">
+          <span class="px-1 py-0.5 text-[9px] font-medium rounded-full shrink-0" :class="getStatusBadgeClass(detection.feedback)">
             {{ getStatusLabel(detection.feedback) }}
           </span>
         </div>
         
         <!-- Detection details -->
-        <div class="text-xs text-gray-600 space-y-1 mb-3">
+        <div class="text-[9px] text-gray-600 space-y-0.5 mb-1.5">
           <div v-if="detection.category">
             <span class="font-medium">Category:</span> {{ detection.category }}
           </div>
           <div v-if="detection.score">
-            <span class="font-medium">Score:</span> {{ (detection.score * 100).toFixed(0) }}%
+            <span class="font-medium">Threat Score:</span> {{ (detection.score * 100).toFixed(0) }}%
+          </div>
+          
+          <!-- Show port details if available -->
+          <div v-if="detection.ai_output?.details?.ports" class="mt-0.5 pt-0.5 border-t border-gray-200">
+            <div class="font-medium mb-0.5 text-[8px]">Ports:</div>
+            <div class="flex flex-wrap gap-0.5">
+              <span 
+                v-for="(port, idx) in detection.ai_output.details.ports.slice(0, 5)" 
+                :key="idx"
+                class="px-0.5 py-0.5 bg-blue-50 text-blue-700 rounded text-[8px]"
+              >
+                {{ typeof port === 'object' ? `${port.port}` : port }}
+              </span>
+              <span v-if="detection.ai_output.details.ports.length > 5" class="text-gray-500 text-[8px]">
+                +{{ detection.ai_output.details.ports.length - 5 }}
+              </span>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Collapsible Statistics/Details Section -->
+        <div class="mb-1.5">
+          <button
+            @click="toggleDetails(detection.id)"
+            class="w-full flex items-center justify-between px-1.5 py-0.5 text-[9px] font-medium text-gray-700 bg-gray-50 hover:bg-gray-100 rounded transition-colors"
+          >
+            <span class="flex items-center gap-0.5">
+              <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              </svg>
+              Details
+            </span>
+            <svg 
+              :class="{ 'rotate-180': isExpanded(detection.id) }" 
+              class="w-2.5 h-2.5 transition-transform" 
+              fill="none" 
+              stroke="currentColor" 
+              viewBox="0 0 24 24"
+            >
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          
+          <!-- Expanded Details -->
+          <div v-if="isExpanded(detection.id)" class="mt-1 p-2 bg-gray-50 rounded border border-gray-200">
+            <div class="space-y-2">
+              <!-- Scanner Information -->
+              <div v-if="detection.ai_output?.scanner">
+                <div class="text-[9px] font-semibold text-gray-700 mb-0.5">Scanner</div>
+                <div class="text-[10px] text-gray-600 bg-white px-1.5 py-0.5 rounded border border-gray-200">
+                  {{ detection.ai_output.scanner }}
+                </div>
+              </div>
+              
+              <!-- Target Information -->
+              <div v-if="detection.ai_output?.target || detection.ai_output?.details?.address">
+                <div class="text-[9px] font-semibold text-gray-700 mb-0.5">Target</div>
+                <div class="text-[10px] text-gray-600 bg-white px-1.5 py-0.5 rounded border border-gray-200 truncate">
+                  {{ detection.ai_output.target || detection.ai_output.details?.address }}
+                </div>
+              </div>
+              
+              <!-- Detailed Port Information -->
+              <div v-if="detection.ai_output?.details?.ports && detection.ai_output.details.ports.length > 0">
+                <div class="text-xs font-semibold text-gray-700 mb-1">
+                  Port Details ({{ detection.ai_output.details.ports.length }} total)
+                </div>
+                <div class="max-h-48 overflow-y-auto bg-white rounded border border-gray-200">
+                  <table class="w-full text-xs">
+                    <thead class="bg-gray-100 sticky top-0">
+                      <tr>
+                        <th class="px-2 py-1 text-left font-medium text-gray-700">Port</th>
+                        <th class="px-2 py-1 text-left font-medium text-gray-700">Protocol</th>
+                        <th class="px-2 py-1 text-left font-medium text-gray-700">Service</th>
+                        <th class="px-2 py-1 text-left font-medium text-gray-700">Version</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="(port, idx) in detection.ai_output.details.ports" :key="idx" class="border-t border-gray-100">
+                        <td class="px-2 py-1 font-mono">{{ port.port || port }}</td>
+                        <td class="px-2 py-1">{{ port.protocol || 'tcp' }}</td>
+                        <td class="px-2 py-1">{{ port.service || '-' }}</td>
+                        <td class="px-2 py-1 text-gray-500">{{ port.version || '-' }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              
+              <!-- Live Hosts (for ping sweep/arp scan) -->
+              <div v-if="detection.ai_output?.details?.live_hosts">
+                <div class="text-xs font-semibold text-gray-700 mb-1">
+                  Live Hosts ({{ detection.ai_output.details.live_hosts.length }})
+                </div>
+                <div class="max-h-32 overflow-y-auto bg-white px-2 py-1 rounded border border-gray-200">
+                  <div class="flex flex-wrap gap-1">
+                    <span v-for="(host, idx) in detection.ai_output.details.live_hosts" :key="idx" class="text-xs font-mono text-gray-700">
+                      {{ host }}{{ idx < detection.ai_output.details.live_hosts.length - 1 ? ',' : '' }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- ARP Scan Hosts -->
+              <div v-if="detection.ai_output?.details?.hosts">
+                <div class="text-xs font-semibold text-gray-700 mb-1">
+                  Discovered Hosts ({{ detection.ai_output.details.hosts.length }})
+                </div>
+                <div class="max-h-48 overflow-y-auto bg-white rounded border border-gray-200">
+                  <table class="w-full text-xs">
+                    <thead class="bg-gray-100 sticky top-0">
+                      <tr>
+                        <th class="px-2 py-1 text-left font-medium text-gray-700">IP Address</th>
+                        <th class="px-2 py-1 text-left font-medium text-gray-700">MAC Address</th>
+                        <th class="px-2 py-1 text-left font-medium text-gray-700">Vendor</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="(host, idx) in detection.ai_output.details.hosts" :key="idx" class="border-t border-gray-100">
+                        <td class="px-2 py-1 font-mono">{{ host.ip }}</td>
+                        <td class="px-2 py-1 font-mono text-gray-600">{{ host.mac }}</td>
+                        <td class="px-2 py-1 text-gray-500">{{ host.vendor || '-' }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              
+              <!-- Statistics Summary -->
+              <div v-if="detection.ai_output?.details" class="pt-2 border-t border-gray-200">
+                <div class="text-xs font-semibold text-gray-700 mb-2">Statistics</div>
+                <div class="grid grid-cols-2 gap-2">
+                  <div v-if="detection.ai_output.details.total_open_ports" class="bg-white px-2 py-1 rounded border border-gray-200">
+                    <div class="text-xs text-gray-500">Open Ports</div>
+                    <div class="text-sm font-semibold text-gray-900">{{ detection.ai_output.details.total_open_ports }}</div>
+                  </div>
+                  <div v-if="detection.ai_output.details.total_live_hosts" class="bg-white px-2 py-1 rounded border border-gray-200">
+                    <div class="text-xs text-gray-500">Live Hosts</div>
+                    <div class="text-sm font-semibold text-gray-900">{{ detection.ai_output.details.total_live_hosts }}</div>
+                  </div>
+                  <div v-if="detection.ai_output.details.total_unique_ips" class="bg-white px-2 py-1 rounded border border-gray-200">
+                    <div class="text-xs text-gray-500">Unique IPs</div>
+                    <div class="text-sm font-semibold text-gray-900">{{ detection.ai_output.details.total_unique_ips }}</div>
+                  </div>
+                  <div v-if="detection.ai_output.details.total_packets" class="bg-white px-2 py-1 rounded border border-gray-200">
+                    <div class="text-xs text-gray-500">Packets</div>
+                    <div class="text-sm font-semibold text-gray-900">{{ detection.ai_output.details.total_packets }}</div>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Raw JSON (for debugging) -->
+              <details class="text-xs">
+                <summary class="cursor-pointer text-gray-600 hover:text-gray-800 font-medium">Raw Data (JSON)</summary>
+                <pre class="mt-2 p-2 bg-gray-900 text-green-400 rounded text-xs overflow-x-auto">{{ JSON.stringify(detection.ai_output, null, 2) }}</pre>
+              </details>
+            </div>
           </div>
         </div>
         
         <!-- Actions -->
-        <div v-if="!detection.feedback" class="flex gap-2">
+        <div v-if="!detection.feedback" class="flex gap-0.5">
           <button
             @click="submitFeedback(detection.id, 'confirmed_threat')"
-            class="flex-1 px-3 py-1.5 text-xs font-medium rounded-md text-white bg-red-600 hover:bg-red-700 transition-colors"
+            class="flex-1 px-1.5 py-0.5 text-[9px] font-medium rounded text-white bg-red-600 hover:bg-red-700 transition-colors"
           >
-            Confirm
+            Threat
           </button>
           <button
             @click="submitFeedback(detection.id, 'false_positive')"
-            class="flex-1 px-3 py-1.5 text-xs font-medium rounded-md text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors"
+            class="flex-1 px-1.5 py-0.5 text-[9px] font-medium rounded text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors"
           >
-            False Positive
+            False
           </button>
         </div>
       </div>

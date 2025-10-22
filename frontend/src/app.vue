@@ -46,15 +46,6 @@ onMounted(() => {
         
         <nav class="mt-6">
           <RouterLink 
-            to="/" 
-            class="flex items-center px-6 py-3 text-indigo-200 hover:bg-indigo-700"
-            active-class="bg-indigo-900 text-white"
-          >
-            <span class="mr-3">📊</span>
-            <span>Dashboard</span>
-          </RouterLink>
-          
-          <RouterLink 
             to="/events" 
             class="flex items-center px-6 py-3 text-indigo-200 hover:bg-indigo-700"
             active-class="bg-indigo-900 text-white"

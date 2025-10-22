@@ -48,12 +48,12 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="p-6 max-w-7xl mx-auto">
+  <div class="p-4 max-w-[1600px] mx-auto">
     <!-- Header -->
-    <div class="flex items-center justify-between mb-6">
+    <div class="flex items-center justify-between mb-4">
       <div>
-        <h1 class="text-3xl font-bold text-gray-800">Security Events</h1>
-        <p class="text-gray-600 mt-1">{{ filteredEvents.length }} events</p>
+        <h1 class="text-2xl font-bold text-gray-800">Security Events</h1>
+        <p class="text-xs text-gray-600 mt-0.5">{{ filteredEvents.length }} events</p>
       </div>
       <div class="flex gap-3">
         <div class="relative">
@@ -79,29 +79,29 @@ onMounted(() => {
     </div>
 
     <!-- Events Grid -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
       <div 
         v-for="event in paginatedEvents" 
         :key="event.id" 
-        class="bg-white rounded-lg border border-gray-200 p-4 hover:shadow-md transition-shadow cursor-pointer"
+        class="bg-white rounded-lg border border-gray-200 p-2 hover:shadow-md transition-shadow cursor-pointer"
       >
-        <div class="flex items-start justify-between mb-3">
-          <div class="flex-1">
-            <h3 class="font-semibold text-gray-900 text-sm mb-1">{{ event.type || 'Unknown Event' }}</h3>
-            <p class="text-xs text-gray-500">{{ formatDate(event.created_at) }}</p>
+        <div class="flex items-start justify-between mb-1.5">
+          <div class="flex-1 min-w-0">
+            <h3 class="font-semibold text-gray-900 text-[10px] mb-0.5 truncate">{{ event.type || 'Unknown Event' }}</h3>
+            <p class="text-[9px] text-gray-500">{{ formatDate(event.created_at) }}</p>
           </div>
-          <span class="px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-800">
+          <span class="px-1.5 py-0.5 text-[9px] font-medium rounded-full bg-blue-100 text-blue-800 shrink-0">
             {{ event.source || 'Unknown' }}
           </span>
         </div>
         
         <!-- Compact payload summary -->
-        <div class="text-xs text-gray-600 space-y-1">
-          <div v-if="event.payload?.details?.address">
+        <div class="text-[9px] text-gray-600 space-y-0.5">
+          <div v-if="event.payload?.details?.address" class="truncate">
             <span class="font-medium">Target:</span> {{ event.payload.details.address }}
           </div>
           <div v-if="event.payload?.details?.ports?.length">
-            <span class="font-medium">Ports:</span> {{ event.payload.details.ports.length }} found
+            <span class="font-medium">Ports:</span> {{ event.payload.details.ports.length }}
           </div>
           <div v-if="event.payload?.severity">
             <span class="font-medium">Severity:</span> {{ event.payload.severity }}

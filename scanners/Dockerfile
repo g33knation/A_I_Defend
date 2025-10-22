@@ -12,6 +12,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     clamav-freshclam \
     libblas3 \
     liblinear4 \
+    tshark \
+    masscan \
+    arp-scan \
+    dnsutils \
     && ldconfig \
     && rm -rf /var/lib/apt/lists/*
 
