@@ -353,12 +353,12 @@ onMounted(() => {
     </div>
 
     <!-- Empty state -->
-    <div v-if="filteredDetections.length === 0" class="text-center py-12 bg-white rounded-lg border border-gray-200">
-      <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <div v-if="filteredDetections.length === 0" class="text-center py-8 bg-white rounded-lg border border-gray-200 max-w-sm mx-auto">
+      <svg class="mx-auto h-9 w-9 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
       </svg>
-      <h3 class="mt-2 text-sm font-medium text-gray-900">No detections found</h3>
-      <p class="mt-1 text-sm text-gray-500">
+      <h3 class="mt-2 text-xs font-semibold text-gray-900">No detections found</h3>
+      <p class="mt-1 text-[11px] text-gray-500">
         {{ searchQuery || selectedStatus !== 'all' ? 'Try adjusting your search or filter' : 'No detections have been recorded yet' }}
       </p>
     </div>

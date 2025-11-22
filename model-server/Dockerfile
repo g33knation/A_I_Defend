@@ -1,5 +1,9 @@
-FROM python:3.11-slim
-WORKDIR /app
-RUN pip install fastapi uvicorn
-COPY server.py /app
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "11434"]
+FROM ollama/ollama:latest
+
+# Install curl for the entrypoint script
+RUN apt-get update && apt-get install -y curl
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]

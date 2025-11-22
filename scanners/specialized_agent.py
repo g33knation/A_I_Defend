@@ -76,10 +76,21 @@ class SpecializedAgent:
                 else:
                     print(f"❌ Registration failed: {response.status_code}")
                     return False
-                    
         except Exception as e:
             print(f"❌ Registration error: {e}")
             return False
+            
+    def _get_scan_progress(self) -> Optional[Dict[str, Any]]:
+        """Get current scan progress if available."""
+        if self.scanner and hasattr(self.scanner, 'progress'):
+            return {
+                'progress': self.scanner.progress,
+                'current_scanner': self.scanner.current_scanner,
+                'scan_details': self.scanner.scan_details,
+                'results_count': len(self.scanner.results),
+                'errors_count': len(self.scanner.errors)
+            }
+        return None
     
     async def send_heartbeat(self) -> Optional[Dict[str, Any]]:
         """Send heartbeat to control plane and check for assignments."""
@@ -96,7 +107,8 @@ class SpecializedAgent:
                         "current_task": self.current_task,
                         "metrics": {
                             "timestamp": datetime.utcnow().isoformat(),
-                            "agent_type": self.agent_type
+                            "agent_type": self.agent_type,
+                            "scan_progress": self._get_scan_progress()
                         }
                     }
                 )
@@ -109,6 +121,13 @@ class SpecializedAgent:
                         print(f"📋 New assignment received: {assignment['assignment_id']}")
                         return assignment
                     
+                    return None
+                elif response.status_code == 404:
+                    print("⚠️  Agent not found (backend restarted?), re-registering...")
+                    await self.register()
+                    return None
+                else:
+                    print(f"⚠️  Heartbeat failed: {response.status_code}")
                     return None
                     
         except Exception as e:
@@ -153,7 +172,8 @@ class SpecializedAgent:
     async def process_assignment(self, assignment: Dict[str, Any]):
         """Process a scan assignment."""
         print(f"\n🎯 Processing assignment: {assignment['assignment_id']}")
-        print(f"   Scanners: {assignment['scanners']}")
+        print(f"   Targets: {assignment.get('targets', [])}")
+        print(f"   Scanners: {assignment.get('scanners', [])}")
         
         self.status = "scanning"
         self.current_task = assignment['assignment_id']
@@ -162,19 +182,81 @@ class SpecializedAgent:
         scanner = None
         
         try:
+            # Build configuration from assignment
+            targets = assignment.get('targets', [])
+            selected_scanners = assignment.get('scanners', [])
+            base_config = assignment.get('config', {})
+            
+            # Create scanner-specific config based on selected scanners
+            scan_config = {}
+            for scanner_name in selected_scanners:
+                print(f"   Processing scanner: '{scanner_name}'")
+                if scanner_name in ['nmap', 'masscan']:
+                    scan_config[scanner_name] = {
+                        'targets': targets,
+                        'ports': base_config.get('ports', '1-1000')
+                    }
+                elif scanner_name == 'ping-sweep':
+                    # Use targets as networks for ping sweep
+                    scan_config['ping_sweep'] = {
+                        'network': targets[0] if targets else '192.168.1.0/24'
+                    }
+                elif scanner_name == 'arp-scan':
+                    scan_config['arp_scan'] = {
+                        'interface': base_config.get('interface', 'eth0')
+                    }
+                elif scanner_name == 'tshark':
+                    scan_config['tshark'] = {
+                        'interface': base_config.get('interface', 'eth0'),
+                        'duration': base_config.get('duration', 30)
+                    }
+                elif scanner_name == 'dns-enum':
+                    scan_config['dns_enum'] = {
+                        'domains': targets
+                    }
+                elif scanner_name == 'clamav':
+                    # Use user-provided targets as paths if available, otherwise default to /usr/bin
+                    paths = targets if targets else base_config.get('paths', ['/usr/bin'])
+                    scan_config['clamav'] = {
+                        'paths': paths
+                    }
+                elif scanner_name == 'yara':
+                    # Use user-provided targets as paths if available, otherwise default to /usr/bin
+                    paths = targets if targets else base_config.get('paths', ['/usr/bin'])
+                    scan_config['yara'] = {
+                        'paths': paths,
+                        'rules': base_config.get('rules', '/etc/yara/rules')
+                    }
+                elif scanner_name == 'chkrootkit':
+                    paths = targets if targets else base_config.get('paths', ['/'])
+                    scan_config['chkrootkit'] = {
+                        'paths': paths
+                    }
+                elif scanner_name == 'rkhunter':
+                    paths = targets if targets else base_config.get('paths', ['/'])
+                    scan_config['rkhunter'] = {
+                        'paths': paths
+                    }
+                elif scanner_name == 'lynis':
+                    scan_config['lynis'] = {}
+                else:
+                    print(f"   ⚠️  Unknown scanner: '{scanner_name}'")
+            
+            print(f"   Scan config: {scan_config}")
+            
             # Import the appropriate scanner
             if self.agent_type == 'network':
                 from network.network_scanner import NetworkScanner
-                scanner = NetworkScanner(assignment.get('config', {}))
+                scanner = NetworkScanner(scan_config)
             elif self.agent_type == 'network_intel':
                 from network_intel.network_intel_scanner import NetworkIntelScanner
-                scanner = NetworkIntelScanner(assignment.get('config', {}))
+                scanner = NetworkIntelScanner(scan_config)
             elif self.agent_type == 'malware':
                 from malware.malware_scanner import MalwareScanner
-                scanner = MalwareScanner(assignment.get('config', {}))
+                scanner = MalwareScanner(scan_config)
             elif self.agent_type == 'security_audit':
                 from security.security_audit_scanner import SecurityAuditScanner
-                scanner = SecurityAuditScanner(assignment.get('config', {}))
+                scanner = SecurityAuditScanner(scan_config)
             else:
                 print(f"❌ Unknown agent type: {self.agent_type}")
                 return
@@ -187,7 +269,7 @@ class SpecializedAgent:
             
             # Send progress updates while scanning
             while not scan_task.done():
-                await asyncio.sleep(5)  # Update every 5 seconds
+                await asyncio.sleep(2)  # Update every 2 seconds
                 await self.send_status_update()
             
             # Wait for scan to complete

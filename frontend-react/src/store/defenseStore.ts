@@ -1,0 +1,332 @@
+import { create } from 'zustand';
+
+interface Event {
+  id: string;
+  type: string;
+  source: string;
+  created_at: string;
+  payload?: any;
+}
+
+interface Detection {
+  id: string;
+  summary: string;
+  type: string;
+  status: string;
+  timestamp: string;
+  created_at: string;
+  feedback?: string;
+  ai_output?: any;
+  category?: string;
+}
+
+interface Stats {
+  totalEvents: number;
+  openDetections: number;
+  threatsBlocked: number;
+  falsePositives: number;
+}
+
+interface Scan {
+  scan_id: string;
+  status: string;
+  start_time: string;
+  end_time?: string;
+  results?: any;
+  error?: string;
+}
+
+interface Agent {
+  agent_id: string;
+  hostname: string;
+  ip_address: string;
+  capabilities: string[];
+  status: string;
+  last_heartbeat: string;
+  registered_at: string;
+  current_assignment?: string;
+  metrics?: any;
+}
+
+interface DefenseState {
+  events: Event[];
+  detections: Detection[];
+  scans: Scan[];
+  agents: Agent[];
+  isLoading: boolean;
+  error: string | null;
+  stats: Stats;
+  fetchEvents: () => Promise<void>;
+  fetchDetections: () => Promise<void>;
+  submitFeedback: (detectionId: string, feedback: string) => Promise<void>;
+  purgeDetections: () => Promise<void>;
+  startScan: (scanners: string[], config?: any) => Promise<string>;
+  fetchScans: () => Promise<void>;
+  getScanResult: (scanId: string) => Promise<Scan>;
+  fetchAgents: () => Promise<void>;
+  deployScan: (agentId: string, target: string, scanners: string[], paths?: string[]) => Promise<void>;
+  registerAgent: (agentId: string, type: string, capabilities: string[]) => Promise<void>;
+  purgeEvents: () => Promise<void>;
+  models: string[];
+  selectedModel: string;
+  fetchModels: () => Promise<void>;
+  setSelectedModel: (model: string) => void;
+  askAI: (query: string, model: string) => Promise<string>;
+}
+
+const API_BASE_URL = window.location.port === '8002'
+  ? 'http://localhost:8000'
+  : window.location.origin;
+
+export const useDefenseStore = create<DefenseState>((set, get) => ({
+  events: [],
+  detections: [],
+  scans: [],
+  agents: [],
+  isLoading: false,
+  error: null,
+  stats: {
+    totalEvents: 0,
+    openDetections: 0,
+    threatsBlocked: 0,
+    falsePositives: 0,
+  },
+
+  fetchEvents: async () => {
+    set({ isLoading: true, error: null });
+    try {
+      const response = await fetch(`${API_BASE_URL}/events`);
+      if (!response.ok) throw new Error('Failed to fetch events');
+      const data = await response.json();
+      set({
+        events: data,
+        isLoading: false,
+        stats: {
+          ...get().stats,
+          totalEvents: data.length,
+        }
+      });
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : 'Unknown error',
+        isLoading: false
+      });
+    }
+  },
+
+  fetchDetections: async () => {
+    set({ isLoading: true, error: null });
+    try {
+      const response = await fetch(`${API_BASE_URL}/detections`);
+      if (!response.ok) throw new Error('Failed to fetch detections');
+      const data = await response.json();
+
+      const openDetections = data.filter((d: any) => !d.feedback).length;
+      const threatsBlocked = data.filter((d: any) => d.feedback === 'confirmed_threat').length;
+      const falsePositives = data.filter((d: any) => d.feedback === 'false_positive').length;
+
+      set({
+        detections: data,
+        isLoading: false,
+        stats: {
+          ...get().stats,
+          openDetections,
+          threatsBlocked,
+          falsePositives,
+        }
+      });
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : 'Unknown error',
+        isLoading: false
+      });
+    }
+  },
+
+  submitFeedback: async (detectionId: string, feedback: string) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ detection_id: parseInt(detectionId), feedback }),
+      });
+      if (!response.ok) throw new Error('Failed to submit feedback');
+      await get().fetchDetections();
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  purgeDetections: async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/detections`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) throw new Error('Failed to purge detections');
+      await get().fetchDetections();
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  startScan: async (scanners: string[], config: any = {}) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/scans/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scanners, config }),
+      });
+      if (!response.ok) throw new Error('Failed to start scan');
+      const data = await response.json();
+      return data.scan_id;
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : 'Unknown error' });
+      throw error;
+    }
+  },
+
+  fetchScans: async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/scans/`);
+      if (!response.ok) throw new Error('Failed to fetch scans');
+      const data = await response.json();
+      set({ scans: data });
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  getScanResult: async (scanId: string) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/scans/${scanId}`);
+      if (!response.ok) throw new Error('Failed to fetch scan result');
+      return await response.json();
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : 'Unknown error' });
+      throw error;
+    }
+  },
+
+  fetchAgents: async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/agents/`);
+      if (!response.ok) throw new Error('Failed to fetch agents');
+      const data = await response.json();
+      set({ agents: data });
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  deployScan: async (agentId: string, target: string, scanners: string[], paths: string[] = []) => {
+    try {
+      // For malware scanner, we might have multiple paths
+      // If paths are provided, use them. Otherwise use target as a single item list if present
+      let targets = paths.length > 0 ? paths : (target ? [target] : []);
+
+      // If we have both target input AND paths (e.g. custom path + checkboxes), combine them
+      if (target && paths.length > 0 && !paths.includes(target)) {
+        targets.push(target);
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/agents/${agentId}/assign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targets: targets,
+          scanners: scanners,
+          config: {
+            // We can pass extra config here if needed
+          },
+          priority: 5 // Default priority
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to assign task');
+      }
+
+      // Refresh agents to show updated status
+      await get().fetchAgents();
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : 'Unknown error' });
+      throw error;
+    }
+  },
+
+  registerAgent: async (agentId: string, type: string, capabilities: string[]) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/agents/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agent_id: agentId,
+          hostname: agentId, // Use agentId as hostname for manual registration
+          ip_address: '127.0.0.1',
+          capabilities: capabilities,
+          metadata: { type }
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to register agent');
+      }
+
+      await get().fetchAgents();
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : 'Unknown error' });
+      throw error;
+    }
+  },
+
+  purgeEvents: async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/events`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) throw new Error('Failed to purge events');
+      await get().fetchEvents();
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  models: [],
+  selectedModel: 'llama2', // Default
+  fetchModels: async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/models`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.models && data.models.length > 0) {
+          set({ models: data.models });
+          // If current selected model is not in list, select first one
+          const current = get().selectedModel;
+          if (!data.models.includes(current)) {
+            set({ selectedModel: data.models[0] });
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch models:', error);
+    }
+  },
+  setSelectedModel: (model: string) => set({ selectedModel: model }),
+
+  askAI: async (query: string, model: string) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/ask`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, model }),
+      });
+      if (!response.ok) throw new Error('Failed to get AI response');
+      const data = await response.json();
+      return data.response;
+    } catch (error) {
+      console.error('AI Error:', error);
+      throw error;
+    }
+  },
+}));

@@ -325,8 +325,8 @@ onMounted(() => {
             <button class="px-2 py-0.5 text-[10px] rounded-full text-gray-500 hover:bg-gray-50">30d</button>
           </div>
         </div>
-        <div class="h-32 flex items-center justify-center bg-gray-50 rounded">
-          <p class="text-xs text-gray-400">Activity chart will be displayed here</p>
+        <div class="h-24 flex items-center justify-center bg-gray-50 rounded">
+          <p class="text-[11px] text-gray-400">Activity chart will be displayed here</p>
         </div>
       </div>
 

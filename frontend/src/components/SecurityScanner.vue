@@ -99,41 +99,45 @@
       </div>
       
       <div v-if="activeScan.findings && activeScan.findings.length > 0" class="scan-results">
-        <div class="results-summary">
-          <div class="summary-item">
-            <span class="summary-count">{{ activeScan.findings.length }}</span>
-            <span class="summary-label">Total Findings</span>
+        <div v-if="loading" class="bg-white shadow-sm rounded-lg p-4 text-center">
+          <div class="flex justify-center">
+            <svg class="animate-spin h-5 w-5 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
           </div>
-          <div class="summary-item" v-if="severityCount('critical') > 0">
-            <span class="summary-count critical">{{ severityCount('critical') }}</span>
-            <span class="summary-label">Critical</span>
-          </div>
-          <div class="summary-item" v-if="severityCount('high') > 0">
-            <span class="summary-count high">{{ severityCount('high') }}</span>
-            <span class="summary-label">High</span>
-          </div>
-          <div class="summary-item" v-if="severityCount('medium') > 0">
-            <span class="summary-count medium">{{ severityCount('medium') }}</span>
-            <span class="summary-label">Medium</span>
-          </div>
-          <div class="summary-item" v-if="severityCount('low') > 0">
-            <span class="summary-count low">{{ severityCount('low') }}</span>
-            <span class="summary-label">Low</span>
-          </div>
+          <p class="mt-3 text-gray-600 text-sm">Analyzing system activity...</p>
         </div>
-        
-        <div class="findings-list">
-          <div v-for="(finding, index) in activeScan.findings" :key="index" class="finding-item">
-            <div class="finding-header" @click="toggleFinding(index)">
-              <span class="finding-severity" :class="finding.severity">
-                {{ finding.severity }}
-              </span>
-              <span class="finding-title">{{ finding.title }}</span>
-              <span class="finding-scanner">{{ finding.scanner }}</span>
-              <span class="finding-time">{{ formatTime(finding.timestamp) }}</span>
-              <span class="finding-toggle">
-                {{ expandedFindings.includes(index) ? '−' : '+' }}
-              </span>
+
+        <div v-else class="space-y-6">
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div class="bg-white rounded-lg shadow-sm p-4">
+              <div class="flex items-center">
+                <div class="p-2 rounded-full bg-indigo-100 text-indigo-600">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7" />
+                  </svg>
+                </div>
+                <div class="summary-item">
+                  <span class="summary-count">{{ activeScan.findings.length }}</span>
+                  <span class="summary-label">Total Findings</span>
+                </div>
+                <div class="summary-item" v-if="severityCount('critical') > 0">
+                  <span class="summary-count critical">{{ severityCount('critical') }}</span>
+                  <span class="summary-label">Critical</span>
+                </div>
+                <div class="summary-item" v-if="severityCount('high') > 0">
+                  <span class="summary-count high">{{ severityCount('high') }}</span>
+                  <span class="summary-label">High</span>
+                </div>
+                <div class="summary-item" v-if="severityCount('medium') > 0">
+                  <span class="summary-count medium">{{ severityCount('medium') }}</span>
+                  <span class="summary-label">Medium</span>
+                </div>
+                <div class="summary-item" v-if="severityCount('low') > 0">
+                  <span class="summary-count low">{{ severityCount('low') }}</span>
+                  <span class="summary-label">Low</span>
+                </div>
+              </div>
             </div>
             <div v-if="expandedFindings.includes(index)" class="finding-details">
               <pre>{{ JSON.stringify(finding.details || finding, null, 2) }}</pre>

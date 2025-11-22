@@ -6,11 +6,14 @@ from datetime import datetime, timedelta
 import uuid
 import json
 
+import asyncio
+
 router = APIRouter(prefix="/api/agents", tags=["agents"])
 
 # In-memory storage for agents (in production, use database)
 agents = {}
 agent_assignments = {}
+registration_lock = asyncio.Lock()
 
 class AgentRegistration(BaseModel):
     agent_id: Optional[str] = None
@@ -50,29 +53,39 @@ class AgentInfo(BaseModel):
 @router.post("/register", response_model=Dict[str, str])
 async def register_agent(registration: AgentRegistration):
     """Register a new scanner agent with the control plane."""
-    # Generate agent ID if not provided
-    agent_id = registration.agent_id or str(uuid.uuid4())
     
-    # Store agent information
-    agents[agent_id] = {
-        "agent_id": agent_id,
-        "hostname": registration.hostname,
-        "ip_address": registration.ip_address,
-        "capabilities": registration.capabilities,
-        "metadata": registration.metadata,
-        "status": "idle",
-        "last_heartbeat": datetime.utcnow(),
-        "registered_at": datetime.utcnow(),
-        "current_assignment": None,
-        "metrics": None
-    }
-    
-    print(f"Agent registered: {agent_id} ({registration.hostname})")
+    async with registration_lock:
+        # Check if agent with same hostname already exists
+        existing_agent_id = None
+        for aid, agent in agents.items():
+            if agent["hostname"] == registration.hostname:
+                existing_agent_id = aid
+                break
+        
+        # Use existing ID or generate new one
+        agent_id = existing_agent_id or registration.agent_id or str(uuid.uuid4())
+        
+        # Store agent information
+        agents[agent_id] = {
+            "agent_id": agent_id,
+            "hostname": registration.hostname,
+            "ip_address": registration.ip_address,
+            "capabilities": registration.capabilities,
+            "metadata": registration.metadata,
+            "status": "idle",
+            "last_heartbeat": datetime.utcnow(),
+            "registered_at": agents[agent_id]["registered_at"] if existing_agent_id else datetime.utcnow(),
+            "current_assignment": agents[agent_id].get("current_assignment") if existing_agent_id else None,
+            "metrics": None
+        }
+        
+        action = "updated" if existing_agent_id else "registered"
+        print(f"Agent {action}: {agent_id} ({registration.hostname})")
     
     return {
         "agent_id": agent_id,
         "status": "registered",
-        "message": f"Agent {agent_id} registered successfully"
+        "message": f"Agent {agent_id} {action} successfully"
     }
 
 @router.post("/heartbeat")

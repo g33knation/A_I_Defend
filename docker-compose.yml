@@ -45,18 +45,19 @@ services:
     working_dir: /app
 
   frontend:
-    build: ./frontend
+    build: ./frontend-react
     container_name: frontend
     depends_on:
       - backend
     ports:
-      - "8001:80"
+      - "8002:80"
 
   # Network Intelligence Agent (Passive + Active Scanning)
   # No credentials needed - uses network protocols only
   network-intel:
     build: ./scanners
     container_name: network-intel
+    hostname: network-intel
     depends_on:
       - backend
     environment:
@@ -72,6 +73,7 @@ services:
   malware-scanner:
     build: ./scanners
     container_name: malware-scanner
+    hostname: malware-scanner
     depends_on:
       - backend
     environment:
@@ -79,14 +81,16 @@ services:
       - AGENT_TYPE=malware
     command: ["python", "-u", "/app/specialized_agent.py", "malware"]
     volumes:
-      - /tmp:/scan/tmp:ro
-      - /var/log:/scan/var/log:ro
+      - /:/host_wsl:ro            # Mount WSL root to /host_wsl
+      - C:/:/host_windows:ro      # Mount Windows C drive to /host_windows
+      - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
 
   # Security Audit Scanner Agent
   security-scanner:
     build: ./scanners
     container_name: security-scanner
+    hostname: security-scanner
     depends_on:
       - backend
     environment:
@@ -96,6 +100,8 @@ services:
     volumes:
       - /etc:/etc:ro
       - /var/log:/var/log:ro
+      - /:/host_wsl:ro            # Mount WSL root to /host_wsl
+      - C:/:/host_windows:ro      # Mount Windows C drive to /host_windows
     restart: unless-stopped
 
   # Legacy all-in-one scanner (optional, can be removed)
@@ -156,9 +162,12 @@ services:
     container_name: model-server
     ports:
       - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
     depends_on:
       - backend
 
 volumes:
   db_data:
+  ollama_data:
 

@@ -1,0 +1,43 @@
+@import "tailwindcss";
+@config "../tailwind.config.js";
+
+/* @import "@fontsource/inter"; */
+/* @import "@fontsource/jetbrains-mono"; */
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  @apply bg-slate-950 text-slate-200 font-sans;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-slate-900;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-700 rounded-full hover:bg-slate-600 transition-colors;
+}
+
+/* Glassmorphism Utilities */
+.glass {
+  @apply bg-slate-900/70 backdrop-blur-md border border-slate-800/50;
+}
+
+.glass-hover {
+  @apply hover:bg-slate-800/70 hover:border-slate-700/50 transition-all duration-300;
+}
+
+.glass-panel {
+  @apply bg-slate-900/40 backdrop-blur-xl border border-white/10 shadow-xl;
+}

@@ -4,9 +4,7 @@ FROM python:3.11-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-client \
     curl \
-    && curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz -o docker.tgz \
-    && tar -xzf docker.tgz --strip-components=1 -C /usr/local/bin docker/docker \
-    && rm docker.tgz \
+    docker.io \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -23,6 +23,11 @@ class SecurityAuditScanner:
         self.temp_dir = tempfile.mkdtemp(prefix="security_audit_")
         self.remote_host = config.get('remote_host')  # SSH target: user@host
         self.remote_key = config.get('remote_key')    # SSH key path
+        
+        # Progress tracking
+        self.progress = 0
+        self.current_scanner = "initializing"
+        self.scan_details = {}
     
     async def run_command(self, cmd: List[str], timeout: int = 600) -> Dict[str, Any]:
         """Execute a command asynchronously."""
@@ -99,82 +104,126 @@ class SecurityAuditScanner:
         except Exception as e:
             self.errors.append(f"Lynis scan error: {str(e)}")
     
-    async def scan_chkrootkit(self):
+    async def scan_chkrootkit(self, paths: List[str] = None):
         """Run chkrootkit rootkit detection."""
-        cmd = ["chkrootkit", "-q"]  # Quiet mode, only show problems
+        base_cmd = ["chkrootkit", "-q"]  # Quiet mode, only show problems
         
-        try:
-            result = await self.run_command(cmd, timeout=600)
+        # If paths are provided, we need to scan each path or use -r if supported
+        # chkrootkit -r <root> scans a specified root directory
+        
+        scan_paths = paths if paths else ["/"]
+        
+        for path in scan_paths:
+            cmd = base_cmd.copy()
+            if path != "/":
+                cmd.extend(["-r", path])
             
-            findings = []
-            for line in result["stdout"].split('\n'):
-                line = line.strip()
-                if line and 'INFECTED' in line.upper():
-                    findings.append({
-                        'type': 'infected',
-                        'details': line
-                    })
-                elif line and 'WARNING' in line.upper():
-                    findings.append({
-                        'type': 'warning',
-                        'details': line
-                    })
-            
-            self.results.append({
-                'scanner': 'chkrootkit',
-                'details': {
-                    'findings': findings,
-                    'total_findings': len(findings),
-                    'scan_complete': result["returncode"] == 0
-                }
-            })
-            
-        except Exception as e:
-            self.errors.append(f"chkrootkit scan error: {str(e)}")
+            try:
+                result = await self.run_command(cmd, timeout=600)
+                
+                findings = []
+                for line in result["stdout"].split('\n'):
+                    line = line.strip()
+                    if line and 'INFECTED' in line.upper():
+                        findings.append({
+                            'type': 'infected',
+                            'details': line,
+                            'path': path
+                        })
+                    elif line and 'WARNING' in line.upper():
+                        findings.append({
+                            'type': 'warning',
+                            'details': line,
+                            'path': path
+                        })
+                
+                self.results.append({
+                    'scanner': 'chkrootkit',
+                    'path': path,
+                    'details': {
+                        'findings': findings,
+                        'total_findings': len(findings),
+                        'scan_complete': result["returncode"] == 0
+                    }
+                })
+                
+            except Exception as e:
+                self.errors.append(f"chkrootkit scan error for {path}: {str(e)}")
     
-    async def scan_rkhunter(self):
+    async def scan_rkhunter(self, paths: List[str] = None):
         """Run rkhunter rootkit detection."""
         # Update rkhunter database first
         update_cmd = ["rkhunter", "--update", "--quiet"]
         await self.run_command(update_cmd, timeout=300)
         
         # Run the scan
-        cmd = ["rkhunter", "--check", "--skip-keypress", "--report-warnings-only"]
+        base_cmd = ["rkhunter", "--check", "--skip-keypress", "--report-warnings-only"]
         
-        try:
-            result = await self.run_command(cmd, timeout=900)
+        scan_paths = paths if paths else ["/"]
+        
+        for path in scan_paths:
+            cmd = base_cmd.copy()
+            if path != "/":
+                cmd.extend(["--rootdir", path])
             
-            warnings = []
-            for line in result["stdout"].split('\n'):
-                line = line.strip()
-                if line and ('Warning:' in line or 'warning' in line.lower()):
-                    warnings.append(line)
-            
-            self.results.append({
-                'scanner': 'rkhunter',
-                'details': {
-                    'warnings': warnings,
-                    'total_warnings': len(warnings),
-                    'scan_complete': True
-                }
-            })
-            
-        except Exception as e:
-            self.errors.append(f"rkhunter scan error: {str(e)}")
+            try:
+                result = await self.run_command(cmd, timeout=900)
+                
+                warnings = []
+                for line in result["stdout"].split('\n'):
+                    line = line.strip()
+                    if line and ('Warning:' in line or 'warning' in line.lower()):
+                        warnings.append(line)
+                
+                self.results.append({
+                    'scanner': 'rkhunter',
+                    'path': path,
+                    'details': {
+                        'warnings': warnings,
+                        'total_warnings': len(warnings),
+                        'scan_complete': True
+                    }
+                })
+                
+            except Exception as e:
+                self.errors.append(f"rkhunter scan error for {path}: {str(e)}")
     
     async def scan(self):
         """Run all security audit scans."""
+        self.progress = 0
+        total_steps = 3
+        current_step = 0
+        
         # Run Lynis if configured
         if 'lynis' in self.config or not self.config:
+            self.current_scanner = "lynis"
+            self.progress = 10
+            print("   Starting Lynis audit...")
             await self.scan_lynis()
+            current_step += 1
         
         # Run chkrootkit if configured
         if 'chkrootkit' in self.config or not self.config:
-            await self.scan_chkrootkit()
+            self.current_scanner = "chkrootkit"
+            self.progress = 40
+            paths = self.config.get('chkrootkit', {}).get('paths', self.config.get('paths', ['/']))
+            self.scan_details['targets'] = paths
+            print(f"   Starting chkrootkit scan on {paths}")
+            await self.scan_chkrootkit(paths)
+            current_step += 1
         
         # Run rkhunter if configured
         if 'rkhunter' in self.config or not self.config:
-            await self.scan_rkhunter()
+            self.current_scanner = "rkhunter"
+            self.progress = 70
+            paths = self.config.get('rkhunter', {}).get('paths', self.config.get('paths', ['/']))
+            self.scan_details['targets'] = paths
+            print(f"   Starting rkhunter scan on {paths}")
+            await self.scan_rkhunter(paths)
+            current_step += 1
+        
+        self.progress = 100
+        self.current_scanner = "complete"
         
         # Cleanup
         if os.path.exists(self.temp_dir):

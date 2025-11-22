@@ -42,7 +42,7 @@ DB_NAME = "defense"
 # Format: postgresql://user:password@host:port/dbname
 DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 print(f"Connecting to database at: postgresql://{DB_USER}:******@{DB_HOST}:{DB_PORT}/{DB_NAME}")
-MODEL_SERVER_URL = os.getenv("MODEL_SERVER_URL", "http://localhost:11434")
+MODEL_SERVER_URL = os.getenv("MODEL_SERVER_URL", "http://model-server:11434")
 
 # DB pool
 @app.on_event("startup")
@@ -276,13 +276,23 @@ async def purge_detections():
         await conn.execute("DELETE FROM detections")
     return {"status": "ok", "message": "All detections purged"}
 
+@app.delete("/events")
+async def purge_events():
+    """Delete all events and associated detections."""
+    async with app.state.pool.acquire() as conn:
+        # Delete dependent data first to avoid FK constraint violations
+        await conn.execute("DELETE FROM detection_feedback")
+        await conn.execute("DELETE FROM detections")
+        await conn.execute("DELETE FROM events")
+    return {"status": "ok", "message": "All events and detections purged"}
+
 @app.post("/ask")
 async def ask_model(req: AskIn):
     """Send a query to Ollama and return the response."""
     try:
         async with httpx.AsyncClient() as client:
             # Call Ollama's API with the specified model
-            ollama_url = "http://localhost:11434/api/generate"
+            ollama_url = f"{MODEL_SERVER_URL}/api/generate"
             payload = {
                 "model": req.model,  # Use the model from the request
                 "prompt": req.query,
@@ -292,7 +302,7 @@ async def ask_model(req: AskIn):
             response = await client.post(
                 ollama_url,
                 json=payload,
-                timeout=60.0  # Increased timeout for model inference
+                timeout=120.0  # Increased timeout for model inference
             )
             response.raise_for_status()
             result = response.json()
@@ -305,3 +315,22 @@ async def ask_model(req: AskIn):
             status_code=500,
             detail=f"Error querying Ollama: {str(e)}"
         )
+
+@app.get("/models")
+async def list_models():
+    """List available Ollama models."""
+    """List available Ollama models."""
+    try:
+        async with httpx.AsyncClient() as client:
+            ollama_url = f"{MODEL_SERVER_URL}/api/tags"
+            response = await client.get(ollama_url, timeout=10.0)
+            if response.status_code == 200:
+                data = response.json()
+                # Extract model names
+                models = [model['name'] for model in data.get('models', [])]
+                return {"models": models}
+            return {"models": []}
+    except Exception as e:
+        print(f"Error fetching models: {str(e)}")
+        # Return default models if Ollama is unreachable
+        return {"models": ["llama2", "mistral"]}
