@@ -28,7 +28,6 @@ export default function Layout() {
     { path: '/analysis', label: 'AI Analysis' },
     { path: '/chat', label: 'Security Assistant' },
     { path: '/agents', label: 'Scanner Agents' },
-    { path: '/ask', label: 'Ask AI' },
   ];
 
   return (
@@ -36,11 +35,11 @@ export default function Layout() {
       {/* Mobile menu button */}
       <div className="lg:hidden glass sticky top-0 z-50 p-4 flex justify-between items-center border-b border-slate-800/50">
         <div className="flex items-center gap-2">
-          <h1 className="text-white text-lg font-bold tracking-tight">AI Defense</h1>
+          <h1 className="text-white text-xl font-bold tracking-tight">AI Defense</h1>
         </div>
         <button
           onClick={() => setIsMenuOpen(!isMenuOpen)}
-          className="text-cyan-400 hover:text-cyan-300 font-mono text-sm border border-cyan-500/30 px-3 py-1 rounded bg-cyan-500/10 transition-colors"
+          className="text-cyan-400 hover:text-cyan-300 font-mono text-base border border-cyan-500/30 px-4 py-2 rounded bg-cyan-500/10 transition-colors"
         >
           {isMenuOpen ? 'CLOSE' : 'MENU'}
         </button>
@@ -50,24 +49,24 @@ export default function Layout() {
         {/* Sidebar */}
         <div
           className={`
-            fixed inset-y-0 left-0 z-40 w-64 glass border-r border-slate-800/50 
+            fixed inset-y-0 left-0 z-40 w-72 glass border-r border-slate-800/50 
             transform transition-transform duration-300 ease-in-out 
             lg:translate-x-0 lg:static lg:inset-auto lg:block
             ${isMenuOpen ? 'translate-x-0' : '-translate-x-full'}
+            flex flex-col
           `}
         >
-          <div className="p-6 border-b border-slate-800/50 flex items-center gap-3">
+          <div className="p-6 border-b border-slate-800/50 flex items-center gap-3 shrink-0">
             <div className="p-2 bg-cyan-500/10 rounded-lg border border-cyan-500/20">
-              <div className="w-6 h-6 bg-cyan-500/20 rounded-sm"></div>
+              <div className="w-7 h-7 bg-cyan-500/20 rounded-sm"></div>
             </div>
-            <div>
-              <h1 className="text-lg font-bold text-white tracking-tight">AI Defense</h1>
-              <div className="flex items-center gap-2">
-                <p className="text-slate-500 text-xs font-mono">Security Monitor</p>
+            <div className="flex-1 min-w-0">
+              <h1 className="text-xl font-bold text-white tracking-tight truncate">AI Defense</h1>
+              <div className="flex items-center gap-2 mt-1">
                 <select
                   value={useDefenseStore(state => state.selectedModel)}
                   onChange={(e) => useDefenseStore.getState().setSelectedModel(e.target.value)}
-                  className="bg-slate-900/50 border border-slate-800 text-xs text-slate-400 rounded px-1 py-0.5 focus:outline-none focus:border-cyan-500/50"
+                  className="bg-slate-900/50 border border-slate-800 text-sm text-slate-300 rounded px-2 py-1 focus:outline-none focus:border-cyan-500/50 w-full"
                 >
                   {useDefenseStore(state => state.models).map(model => (
                     <option key={model} value={model}>{model}</option>
@@ -77,15 +76,15 @@ export default function Layout() {
             </div>
           </div>
 
-          <nav className="mt-6 px-3 space-y-1">
+          <nav className="flex-1 overflow-y-auto py-6 px-3 space-y-2 min-h-0">
             {navItems.map((item) => (
               <Link
                 key={item.path}
                 to={item.path}
                 onClick={() => setIsMenuOpen(false)}
-                className={`flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-all duration-200 ${isActive(item.path)
+                className={`flex items-center px-4 py-3.5 text-base font-medium rounded-lg transition-all duration-200 ${isActive(item.path)
                   ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 shadow-[0_0_15px_rgba(6,182,212,0.15)]'
-                  : 'text-slate-400 hover:text-white hover:bg-white/5'
+                  : 'text-slate-300 hover:text-white hover:bg-white/5'
                   }`}
               >
                 {item.label}
@@ -93,14 +92,14 @@ export default function Layout() {
             ))}
           </nav>
 
-          <div className="absolute bottom-0 w-full p-4 border-t border-slate-800/50 bg-slate-900/30 backdrop-blur-sm">
-            <div className="text-xs text-slate-500 font-mono">
+          <div className="p-5 border-t border-slate-800/50 bg-slate-900/30 backdrop-blur-sm shrink-0">
+            <div className="text-sm text-slate-500 font-mono">
               <div className="flex items-center gap-2">
-                <span className="text-emerald-500">●</span>
+                <span className="text-emerald-500 text-base">●</span>
                 <span>System Online</span>
               </div>
-              <div className="mt-1 opacity-50">
-                Last update: {new Date().toLocaleTimeString()}
+              <div className="mt-1.5 opacity-50 text-xs">
+                Model: {useDefenseStore(state => state.selectedModel).split(':')[0]}
               </div>
             </div>
           </div>

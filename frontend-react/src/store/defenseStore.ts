@@ -43,6 +43,7 @@ interface Agent {
   capabilities: string[];
   status: string;
   last_heartbeat: string;
+  last_scan_time?: string;
   registered_at: string;
   current_assignment?: string;
   metrics?: any;
@@ -72,11 +73,15 @@ interface DefenseState {
   fetchModels: () => Promise<void>;
   setSelectedModel: (model: string) => void;
   askAI: (query: string, model: string) => Promise<string>;
+  // Threat Monitor Stats
+  getThreatLevel: () => 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  getActiveThreatsCount: () => number;
+  getThreatStats: () => { critical: number; warning: number; info: number };
 }
 
-const API_BASE_URL = window.location.port === '8002'
+const API_BASE_URL = import.meta.env.VITE_API_URL || (window.location.port === '8002'
   ? 'http://localhost:8000'
-  : window.location.origin;
+  : window.location.origin);
 
 export const useDefenseStore = create<DefenseState>((set, get) => ({
   events: [],
@@ -328,5 +333,47 @@ export const useDefenseStore = create<DefenseState>((set, get) => ({
       console.error('AI Error:', error);
       throw error;
     }
+  },
+
+  // Threat Monitor Statistics
+  getThreatLevel: () => {
+    const detections = get().detections;
+    if (detections.length === 0) return 'LOW';
+
+    // Calculate average score from detections with scores
+    const scores = detections
+      .map(d => d.ai_output?.score || 0)
+      .filter(s => s > 0);
+
+    if (scores.length === 0) return 'LOW';
+
+    const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+    const maxScore = Math.max(...scores);
+
+    // Determine threat level based on max score and count of high-score detections
+    const highScoreCount = scores.filter(s => s >= 0.7).length;
+
+    if (maxScore >= 0.8 && highScoreCount >= 3) return 'CRITICAL';
+    if (maxScore >= 0.7 || (avgScore >= 0.5 && detections.length >= 5)) return 'HIGH';
+    if (maxScore >= 0.5 || avgScore >= 0.3) return 'MEDIUM';
+    return 'LOW';
+  },
+
+  getActiveThreatsCount: () => {
+    const detections = get().detections;
+    // Count detections without feedback (unresolved) with score > 0.5
+    return detections.filter(d => !d.feedback && (d.ai_output?.score || 0) > 0.5).length;
+  },
+
+  getThreatStats: () => {
+    const detections = get().detections;
+    return {
+      critical: detections.filter(d => (d.ai_output?.score || 0) >= 0.7 && !d.feedback).length,
+      warning: detections.filter(d => {
+        const score = d.ai_output?.score || 0;
+        return score >= 0.4 && score < 0.7 && !d.feedback;
+      }).length,
+      info: detections.filter(d => (d.ai_output?.score || 0) < 0.4 && !d.feedback).length,
+    };
   },
 }));

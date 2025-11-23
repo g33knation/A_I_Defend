@@ -16,6 +16,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     masscan \
     arp-scan \
     dnsutils \
+    chkrootkit \
+    rkhunter \
     && ldconfig \
     && rm -rf /var/lib/apt/lists/*
 

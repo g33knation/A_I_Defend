@@ -287,8 +287,17 @@ export default function Agents() {
               ) : (
                 <div className="flex justify-between items-center">
                   <div className="text-xs font-mono">
-                    <span className="text-slate-500">Last Seen </span>
-                    <span className="text-slate-300">{new Date(agent.last_heartbeat).toLocaleTimeString()}</span>
+                    {agent.last_scan_time ? (
+                      <>
+                        <span className="text-slate-500">Last Scan </span>
+                        <span className="text-slate-300">{new Date(agent.last_scan_time).toLocaleTimeString()}</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-slate-500">Last Seen </span>
+                        <span className="text-slate-300">{new Date(agent.last_heartbeat).toLocaleTimeString()}</span>
+                      </>
+                    )}
                   </div>
                   <button
                     onClick={() => {

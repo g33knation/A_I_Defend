@@ -74,6 +74,7 @@ async def register_agent(registration: AgentRegistration):
             "metadata": registration.metadata,
             "status": "idle",
             "last_heartbeat": datetime.utcnow(),
+            "last_scan_time": agents[agent_id].get("last_scan_time") if existing_agent_id else None,
             "registered_at": agents[agent_id]["registered_at"] if existing_agent_id else datetime.utcnow(),
             "current_assignment": agents[agent_id].get("current_assignment") if existing_agent_id else None,
             "metrics": None
@@ -94,6 +95,10 @@ async def agent_heartbeat(heartbeat: AgentHeartbeat):
     if heartbeat.agent_id not in agents:
         raise HTTPException(status_code=404, detail="Agent not registered")
     
+    # Check for status change to update last_scan_time
+    current_status = agents[heartbeat.agent_id]["status"]
+    new_status = heartbeat.status
+    
     # Update agent status
     agents[heartbeat.agent_id].update({
         "status": heartbeat.status,
@@ -101,6 +106,11 @@ async def agent_heartbeat(heartbeat: AgentHeartbeat):
         "current_task": heartbeat.current_task,
         "metrics": heartbeat.metrics,
     })
+    
+    # If transitioning from scanning to idle, update last_scan_time
+    if current_status == "scanning" and new_status == "idle":
+        agents[heartbeat.agent_id]["last_scan_time"] = datetime.utcnow()
+
     agents[heartbeat.agent_id]["current_assignment"] = heartbeat.current_task
 
     assignment = None
@@ -125,8 +135,6 @@ async def list_agents():
     # Return raw agent data to ensure metrics field is always included
     agent_list = []
     for agent in agents.values():
-        print(f"DEBUG: Agent keys: {agent.keys()}")
-        print(f"DEBUG: Metrics value: {agent.get('metrics')}")
         agent_data = {
             "agent_id": agent["agent_id"],
             "hostname": agent["hostname"],
@@ -134,16 +142,14 @@ async def list_agents():
             "capabilities": agent["capabilities"],
             "status": agent["status"],
             "last_heartbeat": agent["last_heartbeat"].isoformat(),
+            "last_scan_time": agent.get("last_scan_time").isoformat() if agent.get("last_scan_time") else None,
             "registered_at": agent["registered_at"].isoformat(),
             "current_assignment": agent.get("current_assignment"),
             "metrics": agent.get("metrics")  # Explicitly include metrics
         }
-        print(f"DEBUG: agent_data keys: {agent_data.keys()}")
-        print(f"DEBUG: agent_data metrics: {agent_data['metrics']}")
         agent_list.append(agent_data)
     # Manually serialize to ensure None values are included
     json_str = json.dumps(agent_list, default=str)
-    print(f"DEBUG: JSON string: {json_str[:500]}")
     return JSONResponse(content=json.loads(json_str))
 
 @router.get("/{agent_id}", response_model=AgentInfo)

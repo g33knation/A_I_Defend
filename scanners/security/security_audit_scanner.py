@@ -118,9 +118,14 @@ class SecurityAuditScanner:
             if path != "/":
                 cmd.extend(["-r", path])
             
+            print(f"DEBUG: Running chkrootkit command: {' '.join(cmd)}")
             try:
                 result = await self.run_command(cmd, timeout=600)
+                print(f"DEBUG: chkrootkit return code: {result['returncode']}")
                 
+                if result['returncode'] != 0:
+                     print(f"DEBUG: chkrootkit stderr: {result['stderr']}")
+
                 findings = []
                 for line in result["stdout"].split('\n'):
                     line = line.strip()
@@ -148,6 +153,7 @@ class SecurityAuditScanner:
                 })
                 
             except Exception as e:
+                print(f"ERROR: chkrootkit failed for {path}: {e}")
                 self.errors.append(f"chkrootkit scan error for {path}: {str(e)}")
     
     async def scan_rkhunter(self, paths: List[str] = None):
