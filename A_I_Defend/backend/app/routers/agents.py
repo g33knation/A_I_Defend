@@ -5,8 +5,8 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 import uuid
 import json
-
 import asyncio
+from app.auth import verify_api_key, get_current_user
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
 
@@ -51,7 +51,7 @@ class AgentInfo(BaseModel):
         use_enum_values = True
 
 @router.post("/register", response_model=Dict[str, str])
-async def register_agent(registration: AgentRegistration):
+async def register_agent(registration: AgentRegistration, api_key: str = Depends(verify_api_key)):
     """Register a new scanner agent with the control plane."""
     
     async with registration_lock:
@@ -90,7 +90,7 @@ async def register_agent(registration: AgentRegistration):
     }
 
 @router.post("/heartbeat")
-async def agent_heartbeat(heartbeat: AgentHeartbeat):
+async def agent_heartbeat(heartbeat: AgentHeartbeat, api_key: str = Depends(verify_api_key)):
     """Receive heartbeat from an agent to maintain connection."""
     if heartbeat.agent_id not in agents:
         raise HTTPException(status_code=404, detail="Agent not registered")
@@ -111,13 +111,7 @@ async def agent_heartbeat(heartbeat: AgentHeartbeat):
     if current_status == "scanning" and new_status == "idle":
         agents[heartbeat.agent_id]["last_scan_time"] = datetime.utcnow()
 
-    # Update current_assignment based on agent report, BUT don't overwrite a pending assignment with None
-    # This prevents the UI from "flashing" or losing the assignment state before the agent picks it up
-    if heartbeat.current_task:
-        agents[heartbeat.agent_id]["current_assignment"] = heartbeat.current_task
-    elif heartbeat.agent_id not in agent_assignments:
-        # Only clear it if we don't have a pending assignment waiting to be picked up
-        agents[heartbeat.agent_id]["current_assignment"] = None
+    agents[heartbeat.agent_id]["current_assignment"] = heartbeat.current_task
 
     assignment = None
 
@@ -167,7 +161,7 @@ async def get_agent(agent_id: str):
     return AgentInfo(**agents[agent_id])
 
 @router.post("/{agent_id}/assign")
-async def assign_scan(agent_id: str, assignment: ScanAssignment):
+async def assign_scan(agent_id: str, assignment: ScanAssignment, api_key: str = Depends(verify_api_key)):
     """Assign a scan task to a specific agent."""
     if agent_id not in agents:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -196,7 +190,7 @@ async def assign_scan(agent_id: str, assignment: ScanAssignment):
     }
 
 @router.delete("/{agent_id}")
-async def deregister_agent(agent_id: str):
+async def deregister_agent(agent_id: str, api_key: str = Depends(verify_api_key)):
     """Deregister an agent."""
     if agent_id not in agents:
         raise HTTPException(status_code=404, detail="Agent not found")

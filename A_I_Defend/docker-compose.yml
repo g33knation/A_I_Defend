@@ -1,0 +1,158 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+
+  db:
+    image: postgres:15
+    container_name: db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./scans:/scans
+    ports:
+      - "5434:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d defense" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    container_name: backend
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      RABBITMQ_URL: ${RABBITMQ_URL}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      DB_HOST: ${DB_HOST:-db}
+      DB_PORT: ${DB_PORT:-5432}
+      MODEL_SERVER_URL: ${MODEL_SERVER_URL:-http://model-server:11434}
+      SECRET_KEY: ${SECRET_KEY:-insecure-secret-key-change-this}
+      AGENT_API_KEY: ${AGENT_API_KEY:-default-agent-key}
+    volumes:
+      - ./scanners:/app/scanners
+      - ./backend/app/init.sql:/docker-entrypoint-initdb.d/init.sql
+      # - /var/run/docker.sock:/var/run/docker.sock # REMOVED: Insecure
+    ports:
+      - "8000:8000"
+    working_dir: /app
+
+  frontend:
+    build: ../frontend-react
+    container_name: frontend
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+
+  model-server:
+    build: ./model-server
+    container_name: model-server
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+
+  # Network Monitoring Agent - Continuously monitors network traffic
+  network-monitor:
+    build: ./agents
+    container_name: network-monitor
+    network_mode: host # Required for network monitoring
+    depends_on:
+      - backend
+    environment:
+      BACKEND_URL: ${BACKEND_URL:-http://localhost:8000}
+      AGENT_API_KEY: ${AGENT_API_KEY:-default-agent-key}
+      NETWORK_INTERFACE: ${NETWORK_INTERFACE:-any}
+    privileged: true # Required for packet capture
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+
+  # Malware Scanner - Scans for malware
+  malware-scanner:
+    build:
+      context: ./scanners
+      dockerfile: Dockerfile
+    container_name: malware-scanner
+    command: [ "python", "-u", "malware_agent.py" ]
+    volumes:
+      - ./scans:/scans
+      # - /var/run/docker.sock:/var/run/docker.sock # REMOVED: Insecure
+    depends_on:
+      backend:
+        condition: service_started
+    environment:
+      BACKEND_URL: http://172.18.0.4:8000
+      AGENT_API_KEY: ${AGENT_API_KEY:-default-agent-key}
+
+  # Security Scanner - General security auditing
+  security-scanner:
+    build:
+      context: ./scanners
+      dockerfile: Dockerfile
+    container_name: security-scanner
+    command: [ "python", "-u", "security_agent.py" ]
+    volumes:
+      - ./scans:/scans
+    depends_on:
+      backend:
+        condition: service_started
+    environment:
+      BACKEND_URL: http://172.18.0.4:8000
+      AGENT_API_KEY: ${AGENT_API_KEY:-default-agent-key}
+
+  # Network Intelligence - Network reconnaissance tools
+  network-intel:
+    build:
+      context: ./scanners
+      dockerfile: Dockerfile
+    container_name: network-intel
+    command: [ "python", "-u", "intel_agent.py" ]
+    depends_on:
+      backend:
+        condition: service_started
+    environment:
+      BACKEND_URL: http://172.18.0.4:8000
+      AGENT_API_KEY: ${AGENT_API_KEY:-default-agent-key}
+
+  # ClamAV - Standalone antivirus service
+  clamav:
+    image: clamav/clamav:latest
+    container_name: clamav
+    volumes:
+      - clamav_data:/var/lib/clamav
+      - ./scans:/scans:ro
+    ports:
+      - "3310:3310"
+
+  # Nmap - Network mapping service
+  nmap:
+    image: instrumentisto/nmap:latest
+    container_name: nmap
+    command: tail -f /dev/null
+    network_mode: host
+
+volumes:
+  db_data:
+  ollama_data:
+  clamav_data:

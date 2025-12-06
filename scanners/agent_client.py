@@ -115,8 +115,8 @@ class AgentClient:
             assignment = await self.send_heartbeat()
             
             if assignment:
-                # Process the assignment
-                await self.process_assignment(assignment)
+                # Process the assignment in the background so heartbeats continue
+                asyncio.create_task(self.process_assignment(assignment))
             
             await asyncio.sleep(self.heartbeat_interval)
     

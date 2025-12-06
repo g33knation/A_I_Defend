@@ -2,25 +2,23 @@ import os
 import sys
 from pathlib import Path
 import json
+from datetime import timedelta
 
 # Add the backend directory to the Python path
 backend_dir = str(Path(__file__).parent.parent)
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
-from fastapi import FastAPI, Depends, Request, Response, HTTPException
+from fastapi import FastAPI, Depends, Request, Response, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
 import asyncpg
 import httpx
-import uuid
-from datetime import datetime
-
-# Configuration
-MODEL_SERVER_URL = os.getenv("MODEL_SERVER_URL", "http://model-server:11434")
 
 # Import routers
 from app.routers import scans, agents
+from app.auth import Token, create_access_token, get_current_user, ACCESS_TOKEN_EXPIRE_MINUTES, users_db, verify_password
 
 # Create FastAPI app
 app = FastAPI(title="Defense AI Backend")
@@ -28,11 +26,63 @@ app = FastAPI(title="Defense AI Backend")
 # CORS configuration - allow all origins for development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:8000",
+        "http://localhost:8001",
+        "http://localhost:8002",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:8000",
+        "http://127.0.0.1:8001",
+        "http://127.0.0.1:8002",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
+
+# Database configuration
+DB_USER = os.getenv("POSTGRES_USER", "postgres")
+DB_PASSWORD = os.getenv("POSTGRES_PASSWORD", "changeit")
+DB_HOST = os.getenv("DB_HOST", "db")
+DB_PORT = os.getenv("DB_PORT", "5432")
+DB_NAME = os.getenv("POSTGRES_DB", "defense")
+
+# Format: postgresql://user:password@host:port/dbname
+DATABASE_URL = os.getenv("DATABASE_URL", f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
+print(f"Connecting to database at: postgresql://{DB_USER}:******@{DB_HOST}:{DB_PORT}/{DB_NAME}")
+MODEL_SERVER_URL = os.getenv("MODEL_SERVER_URL", "http://model-server:11434")
+
+# DB pool
+@app.on_event("startup")
+async def startup():
+    try:
+        print("Attempting to connect to database...")
+        app.state.pool = await asyncpg.create_pool(
+            dsn=DATABASE_URL,
+            min_size=1,
+            max_size=10,
+            timeout=30.0,
+            command_timeout=5.0
+        )
+        # Test the connection
+        async with app.state.pool.acquire() as conn:
+            await conn.fetch("SELECT 1")
+        print("Successfully connected to the database")
+    except Exception as e:
+        print(f"Failed to connect to the database: {e}")
+        raise
+
+@app.on_event("shutdown")
+async def shutdown():
+    await app.state.pool.close()
+
+# Schemas
+class EventIn(BaseModel):
+    source: str
+    type: str
+    payload: dict
 
 class FeedbackIn(BaseModel):
     detection_id: int
@@ -41,38 +91,25 @@ class AskIn(BaseModel):
     query: str
     model: str = "hermes3:latest"  # Default to hermes3 for offline capability
 
-class EventIn(BaseModel):
-    source: str
-    type: str
-    payload: dict = {}
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database connection pool on startup."""
-    try:
-        # Get database URL from environment
-        database_url = os.getenv("DATABASE_URL")
-        if not database_url:
-            # Fallback for development if env var is missing (though it should be there)
-            database_url = "postgres://postgres:postgres@db:5432/defense"
-            print(f"WARNING: DATABASE_URL not set, using default: {database_url}")
-        
-        app.state.pool = await asyncpg.create_pool(
-            dsn=database_url,
-            min_size=1,
-            max_size=10
+# Auth Endpoint
+@app.post("/login", response_model=Token)
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
+    user = users_db.get(form_data.username)
+    if not user or not verify_password(form_data.password, user["hashed_password"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-        print("Database connection pool created")
-    except Exception as e:
-        print(f"Error creating database pool: {e}")
-        # We don't raise here to allow the app to start, but requests needing DB will fail
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user["username"]}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
 
 # Endpoints
 @app.get("/events", response_model=list[dict])
 async def list_events():
-# ... (omitted lines)
-
     """List all security events."""
     try:
         async with app.state.pool.acquire() as conn:
@@ -91,7 +128,7 @@ async def list_events():
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/events")
-async def ingest_event(event: EventIn):
+async def ingest_event(event: EventIn, api_key: str = Depends(verify_api_key)):
     """Ingest a new security event."""
     print(f"Received event: source={event.source}, type={event.type}")
     try:
@@ -178,10 +215,10 @@ async def ingest_event(event: EventIn):
                             # Format port list
                             if len(ports) <= 5:
                                 port_list = ', '.join([f"{p.get('port', p)}/{p.get('protocol', 'tcp')}" if isinstance(p, dict) else str(p) for p in ports])
-                                summary = f"Port scan on {address}: {port_list} (Source: {event.source})"
+                                summary = f"Port scan on {address}: {port_list}"
                             else:
                                 port_list = ', '.join([f"{p.get('port', p)}/{p.get('protocol', 'tcp')}" if isinstance(p, dict) else str(p) for p in ports[:5]])
-                                summary = f"Port scan on {address}: {port_list} (+{len(ports)-5} more) (Source: {event.source})"
+                                summary = f"Port scan on {address}: {port_list} (+{len(ports)-5} more)"
                         elif 'live_hosts' in details:
                             # Ping sweep results
                             hosts = details['live_hosts']
@@ -249,7 +286,7 @@ async def list_detections():
     return [dict(r) for r in rows]
 
 @app.post("/feedback")
-async def submit_feedback(fb: FeedbackIn):
+async def submit_feedback(fb: FeedbackIn, current_user: dict = Depends(get_current_user)):
     async with app.state.pool.acquire() as conn:
         await conn.execute(
             "UPDATE detections SET feedback=$1 WHERE id=$2",
@@ -258,7 +295,7 @@ async def submit_feedback(fb: FeedbackIn):
     return {"status": "ok"}
 
 @app.delete("/detections")
-async def purge_detections():
+async def purge_detections(current_user: dict = Depends(get_current_user)):
     """Delete all detections."""
     async with app.state.pool.acquire() as conn:
         await conn.execute("DELETE FROM detection_feedback")
@@ -266,7 +303,7 @@ async def purge_detections():
     return {"status": "ok", "message": "All detections purged"}
 
 @app.delete("/events")
-async def purge_events():
+async def purge_events(current_user: dict = Depends(get_current_user)):
     """Delete all events and associated detections."""
     async with app.state.pool.acquire() as conn:
         # Delete dependent data first to avoid FK constraint violations
@@ -276,7 +313,7 @@ async def purge_events():
     return {"status": "ok", "message": "All events and detections purged"}
 
 @app.post("/ask")
-async def ask_model(req: AskIn):
+async def ask_model(req: AskIn, current_user: dict = Depends(get_current_user)):
     """Send a query to Ollama and return the response."""
     try:
         # Fetch recent context (detections)
@@ -335,25 +372,7 @@ async def ask_model(req: AskIn):
             print(f"Error fetching scans context: {e}")
             context_text += "\nRecent Scans: Error retrieving data.\n"
 
-        system_prompt = """You are an advanced AI Security Assistant for the A_I_Defend system.
-        Your capabilities include:
-        1. Analyzing security events and detections from the database.
-        2. Deploying active scanner agents to investigate targets.
-        3. Explaining security concepts and providing remediation advice.
-
-        COMMANDS:
-        You can deploy agents by outputting a specific command pattern. active agents: nmap, clamav, lynis, chkrootkit, rkhunter, yara, suricata.
-        Format: ACTION: SCAN target=<ip_or_host> scanner=<scanner_name>
-        Example: ACTION: SCAN target=192.168.1.50 scanner=nmap
-
-        RULES:
-        - If the user explicitly asks to run a scan, YOU MUST EXECUTE IT immediately. Do not ask for permissions or reasons.
-        - Only deploy a scan *autonomously* if it is CRITICAL to gather missing information for a specific question.
-        - Do NOT suggest commands unless you are actually triggering the ACTION.
-        - Do NOT run a scan just to "analyze" results. If you are provided with scan results in the context, analyze values directly.
-        - If a scan just finished, the results will be in your context. Read them and summarize. Do NOT run another scan (like lynis) unless the user specifically requested a follow-up compliance check.
-        - Be concise and professional.
-        """
+        system_prompt = """You are a Security Analyst for A_I_Defend. Answer questions about the security status based on the information provided to you."""
 
         # Construct the user message with context embedded
         user_content = f"""I am the A_I_Defend security system. Here is my current state:
@@ -394,58 +413,8 @@ Please answer based ONLY on the information above. If I listed specific malware 
             response.raise_for_status()
             result = response.json()
             
-            ai_content = result.get("message", {}).get("content", "")
-            
-            # PARSE AND EXECUTE ACTIONS
-            import re
-            action_match = re.search(r"ACTION: SCAN target=(\S+) scanner=(\S+)", ai_content)
-            if action_match:
-                target = action_match.group(1)
-                scanner_name = action_match.group(2)
-                print(f"AI REQUESTED SCAN: Target={target}, Scanner={scanner_name}")
-                
-                # Find a suitable agent
-                selected_agent_id = None
-                if agents.agents:
-                    for agent_id, agent in agents.agents.items():
-                        if agent["status"] == "idle" and (scanner_name in agent["capabilities"] or "all" in agent["capabilities"]):
-                            selected_agent_id = agent_id
-                            break
-                
-                execution_msg = ""
-                if selected_agent_id:
-                    # Trigger the scan
-                    try:
-                        # Construct assignment object expected by assign_scan
-                        # We need to manually call the logic or simulate the request
-                        # Since assign_scan is an endpoint, we can abstract the logic or call it directly if we refactor.
-                        # For now, let's duplicate the assignment logic slightly for direct internal use
-                        
-                        assignment_id = str(uuid.uuid4())
-                        agents.agent_assignments[selected_agent_id] = {
-                            "assignment_id": assignment_id,
-                            "targets": [target],
-                            "scanners": [scanner_name],
-                            "config": {},
-                            "priority": 5,
-                            "assigned_at": datetime.utcnow().isoformat()
-                        }
-                        agents.agents[selected_agent_id]["current_assignment"] = assignment_id
-                        
-                        # Return special marker for frontend to render interactive bubble
-                        execution_msg = f"\n<<<SCAN_STARTED|id={assignment_id}|target={target}|scanner={scanner_name}>>>"
-                    except Exception as exc:
-                        execution_msg = f"\n\n[SYSTEM] Command Failed: Error assigning task: {exc}"
-                else:
-                    execution_msg = f"\n\n[SYSTEM] Command Failed: No idle agents found with capability '{scanner_name}'."
-                
-                # Strip the raw ACTION command from the output so user doesn't see it twice
-                # We keep the text BEFORE the action if any, and append our execution result/marker
-                parts = ai_content.split("ACTION: SCAN")
-                pre_text = parts[0].strip()
-                ai_content = f"{pre_text}{execution_msg}" if pre_text else execution_msg.strip()
-            
-            return {"response": ai_content}
+            # Chat API returns 'message' -> 'content'
+            return {"response": result.get("message", {}).get("content", "")}
             
     except Exception as e:
         print(f"Error querying Ollama: {str(e)}")
@@ -475,7 +444,7 @@ async def list_models():
 
 
 @app.get("/debug/prompt")
-async def debug_prompt():
+async def debug_prompt(current_user: dict = Depends(get_current_user)):
     """Debug endpoint to show what prompt would be sent to the AI."""
     # Fetch context same way as ask_model
     context_text = ""

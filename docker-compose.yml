@@ -6,15 +6,16 @@ services:
       - "5672:5672"
       - "15672:15672"
     environment:
-      RABBITMQ_DEFAULT_USER: user
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
 
   db:
     image: postgres:15
     container_name: db
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: changeit
-      POSTGRES_DB: defense
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - db_data:/var/lib/postgresql/data
       - ./scans:/scans
@@ -35,11 +36,11 @@ services:
       rabbitmq:
         condition: service_started
     environment:
-      DATABASE_URL: postgresql://postgres:changeit@db:5432/defense
-      RABBITMQ_URL: amqp://user:pass@rabbitmq:5672
+      DATABASE_URL: ${DATABASE_URL}
+      RABBITMQ_URL: ${RABBITMQ_URL}
     volumes:
       - ./scanners:/app/scanners
-      - /var/run/docker.sock:/var/run/docker.sock
+      # - /var/run/docker.sock:/var/run/docker.sock # REMOVED: Insecure
     ports:
       - "8000:8000"
     working_dir: /app
@@ -51,6 +52,22 @@ services:
       - backend
     ports:
       - "8002:80"
+
+  # Network Monitor Agent (Active Scanning)
+  network-monitor:
+    build: ./scanners
+    container_name: network-monitor
+    hostname: network-monitor
+    depends_on:
+      - backend
+    environment:
+      - API_URL=http://backend:8000
+      - AGENT_TYPE=network
+    command: ["python", "-u", "/app/specialized_agent.py", "network"]
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    restart: unless-stopped
 
   # Network Intelligence Agent (Passive + Active Scanning)
   # No credentials needed - uses network protocols only
@@ -81,9 +98,10 @@ services:
       - AGENT_TYPE=malware
     command: ["python", "-u", "/app/specialized_agent.py", "malware"]
     volumes:
-      - /:/host_wsl:ro            # Mount WSL root to /host_wsl
-      - C:/:/host_windows:ro      # Mount Windows C drive to /host_windows
-      - /var/run/docker.sock:/var/run/docker.sock
+      # - /:/host_wsl:ro            # REMOVED: Too broad
+      # - C:/:/host_windows:ro      # REMOVED: Too broad
+      - ./scans:/host_wsl:ro        # Restricted to scans directory for now
+      - /var/run/docker.sock:/var/run/docker.sock # Kept for malware scanner but flagged
     restart: unless-stopped
 
   # Security Audit Scanner Agent

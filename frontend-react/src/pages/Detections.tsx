@@ -55,16 +55,7 @@ export default function Detections() {
     await submitFeedback(detectionId, feedback);
   };
 
-  const getStatusBadgeClass = (status: string) => {
-    switch (status) {
-      case 'confirmed_threat':
-        return 'bg-red-100 text-red-800';
-      case 'false_positive':
-        return 'bg-yellow-100 text-yellow-800';
-      default:
-        return 'bg-blue-100 text-blue-800';
-    }
-  };
+
 
   const getStatusLabel = (status: string) => {
     switch (status) {
@@ -90,12 +81,12 @@ export default function Detections() {
   };
 
   return (
-    <div className="p-4 max-w-[1600px] mx-auto">
+    <div className="p-4 max-w-[1600px] mx-auto space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">Threat Detections</h1>
-          <p className="text-sm text-gray-600 mt-0.5">{filteredDetections.length} detections</p>
+          <h1 className="text-2xl font-bold text-white tracking-tight">Threat Detections</h1>
+          <p className="text-sm text-slate-400 mt-0.5">{filteredDetections.length} detections pending review</p>
         </div>
         <div className="flex gap-3">
           <div className="relative">
@@ -103,20 +94,20 @@ export default function Detections() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               type="text"
-              placeholder="Search..."
-              className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="Search detections..."
+              className="pl-10 pr-4 py-2 bg-slate-900/50 border border-slate-700 rounded-lg text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent transition-all w-64"
             />
-            <svg className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+            <svg className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
               <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
             </svg>
           </div>
           <select
             value={selectedStatus}
             onChange={(e) => setSelectedStatus(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="px-4 py-2 bg-slate-900/50 border border-slate-700 rounded-lg text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent transition-all cursor-pointer"
           >
             {statusOptions.map((option) => (
-              <option key={option.value} value={option.value}>
+              <option key={option.value} value={option.value} className="bg-slate-900 text-slate-200">
                 {option.label}
               </option>
             ))}
@@ -127,7 +118,7 @@ export default function Detections() {
                 await purgeDetections();
               }
             }}
-            className="px-4 py-2 text-base font-medium rounded-lg text-white bg-red-600 hover:bg-red-700 transition-colors"
+            className="px-4 py-2 text-sm font-medium rounded-lg text-white bg-red-600 hover:bg-red-700 transition-colors shadow-lg shadow-red-500/20"
           >
             Purge All
           </button>
@@ -136,126 +127,166 @@ export default function Detections() {
 
       {/* Detections Grid */}
       {paginatedDetections.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-          {paginatedDetections.map((detection: any) => (
-            <div key={detection.id} className="bg-white rounded-lg border border-gray-200 p-2 hover:shadow-md transition-shadow">
-              <div className="flex items-start justify-between mb-1.5">
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-semibold text-gray-900 text-xs mb-0.5 truncate">
-                    {detection.summary || detection.type || 'Detection'}
-                  </h3>
-                  <p className="text-[10px] text-gray-500">{formatDate(detection.detected_at || detection.created_at)}</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {paginatedDetections.map((detection: any) => {
+            // Update badge class logic for dark mode inside mapping if needed, or rely on getStatusBadgeClass
+            // But we need to update getStatusBadgeClass helper too or override it here with classes
+            let badgeClass = 'bg-blue-500/10 text-blue-400 border-blue-500/20';
+            if (detection.feedback === 'confirmed_threat') badgeClass = 'bg-red-500/10 text-red-400 border-red-500/20';
+            if (detection.feedback === 'false_positive') badgeClass = 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20';
+
+            return (
+              <div key={detection.id} className="glass p-4 rounded-xl hover:bg-slate-800/40 transition-all duration-300 group">
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex-1 min-w-0 mr-2">
+                    <h3 className="font-semibold text-slate-200 text-sm mb-1 truncate group-hover:text-white transition-colors">
+                      {detection.summary || detection.type || 'Detection'}
+                    </h3>
+                    <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      {formatDate(detection.detected_at || detection.created_at)}
+                    </div>
+                  </div>
+                  <span className={`px-2 py-0.5 text-[10px] uppercase tracking-wider font-semibold rounded border ${badgeClass} shrink-0`}>
+                    {getStatusLabel(detection.feedback)}
+                  </span>
                 </div>
-                <span className={`px-1 py-0.5 text-[10px] font-medium rounded-full shrink-0 ${getStatusBadgeClass(detection.feedback)}`}>
-                  {getStatusLabel(detection.feedback)}
-                </span>
-              </div>
 
-              {/* Detection details */}
-              <div className="text-[10px] text-gray-600 space-y-0.5 mb-1.5">
-                {detection.category && (
-                  <div>
-                    <span className="font-medium">Category:</span> {detection.category}
-                  </div>
-                )}
-                {detection.score && (
-                  <div>
-                    <span className="font-medium">Threat Score:</span> {(detection.score * 100).toFixed(0)}%
-                  </div>
-                )}
-              </div>
+                {/* Detection details */}
+                <div className="space-y-1.5 pt-3 border-t border-slate-800/50 mb-3">
+                  {detection.category && (
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-500">Category:</span>
+                      <span className="text-slate-300 capitalize">{detection.category}</span>
+                    </div>
+                  )}
+                  {detection.score && (
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-500">Threat Score:</span>
+                      <div className="flex items-center gap-2">
+                        <div className="w-16 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full ${detection.score > 0.7 ? 'bg-red-500' : detection.score > 0.4 ? 'bg-orange-500' : 'bg-blue-500'}`}
+                            style={{ width: `${detection.score * 100}%` }}
+                          />
+                        </div>
+                        <span className="text-slate-300 font-mono">{(detection.score * 100).toFixed(0)}%</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
 
-              {/* Details toggle */}
-              <button
-                onClick={() => toggleDetails(detection.id)}
-                className="w-full flex items-center justify-between px-1.5 py-0.5 text-[10px] font-medium text-gray-700 bg-gray-50 hover:bg-gray-100 rounded transition-colors mb-1.5"
-              >
-                <span>Details</span>
-                <svg
-                  className={`w-2.5 h-2.5 transition-transform ${expandedDetections.has(detection.id) ? 'rotate-180' : ''}`}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
+                {/* Details toggle */}
+                <button
+                  onClick={() => toggleDetails(detection.id)}
+                  className="w-full flex items-center justify-between px-3 py-1.5 text-xs font-medium text-slate-400 bg-slate-900/50 hover:bg-slate-800 rounded-lg transition-colors border border-slate-800/50 mb-3"
                 >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-
-              {/* Expanded details */}
-              {expandedDetections.has(detection.id) && (
-                <div className="mt-1 p-2 bg-gray-50 rounded border border-gray-200 text-[10px] space-y-1">
-                  {detection.ai_output?.scanner && (
-                    <div>
-                      <span className="font-semibold">Scanner:</span> {detection.ai_output.scanner}
-                    </div>
-                  )}
-                  {detection.ai_output?.target && (
-                    <div className="truncate">
-                      <span className="font-semibold">Target:</span> {detection.ai_output.target}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Feedback buttons */}
-              {!detection.feedback && (
-                <div className="flex gap-1">
-                  <button
-                    onClick={() => handleFeedback(detection.id, 'confirmed_threat')}
-                    className="flex-1 px-1.5 py-0.5 text-[10px] font-medium rounded text-white bg-red-600 hover:bg-red-700 transition-colors"
+                  <span>View Details</span>
+                  <svg
+                    className={`w-3 h-3 transition-transform ${expandedDetections.has(detection.id) ? 'rotate-180' : ''}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
                   >
-                    Threat
-                  </button>
-                  <button
-                    onClick={() => handleFeedback(detection.id, 'false_positive')}
-                    className="flex-1 px-1.5 py-0.5 text-[10px] font-medium rounded text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors"
-                  >
-                    False
-                  </button>
-                </div>
-              )}
-            </div>
-          ))}
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+
+                {/* Expanded details */}
+                {expandedDetections.has(detection.id) && (
+                  <div className="mb-3 p-3 bg-slate-950/50 rounded-lg border border-slate-800/50 text-xs text-slate-300 space-y-1.5 animate-in fade-in slide-in-from-top-1">
+                    {detection.ai_output?.scanner && (
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Scanner:</span>
+                        <span className="font-mono text-blue-400">{detection.ai_output.scanner}</span>
+                      </div>
+                    )}
+                    {detection.ai_output?.target && (
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Target:</span>
+                        <span className="font-mono truncate ml-2">{detection.ai_output.target}</span>
+                      </div>
+                    )}
+                    {/* Raw output fallback if needed */}
+                    {!detection.ai_output?.scanner && (
+                      <pre className="overflow-x-auto text-[10px] text-slate-500 max-h-20">
+                        {JSON.stringify(detection.ai_output, null, 2)}
+                      </pre>
+                    )}
+                  </div>
+                )}
+
+                {/* Feedback buttons */}
+                {!detection.feedback && (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleFeedback(detection.id, 'confirmed_threat')}
+                      className="flex-1 px-3 py-1.5 text-xs font-medium rounded-lg text-white bg-red-600/80 hover:bg-red-600 transition-colors border border-red-500/30"
+                    >
+                      Confirm Threat
+                    </button>
+                    <button
+                      onClick={() => handleFeedback(detection.id, 'false_positive')}
+                      className="flex-1 px-3 py-1.5 text-xs font-medium rounded-lg text-slate-300 bg-slate-800 hover:bg-slate-700 transition-colors border border-slate-700"
+                    >
+                      False Positive
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       ) : (
         /* Empty state */
-        <div className="text-center py-8 bg-white rounded-lg border border-gray-200 max-w-sm mx-auto">
-          <h3 className="mt-2 text-sm font-semibold text-gray-900">No detections found</h3>
-          <p className="mt-1 text-xs text-gray-500">
-            {searchQuery || selectedStatus !== 'all' ? 'Try adjusting your search or filter' : 'No detections have been recorded yet'}
+        <div className="flex flex-col items-center justify-center py-20 text-center glass rounded-xl">
+          <div className="p-3 bg-slate-900/50 rounded-full mb-4">
+            <svg className="h-8 w-8 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <h3 className="text-lg font-medium text-slate-200">No detections found</h3>
+          <p className="mt-1 text-sm text-slate-500 max-w-xs mx-auto">
+            {searchQuery || selectedStatus !== 'all'
+              ? 'No detections match your filters.'
+              : 'Clean slate! No threats have been detected yet.'}
           </p>
         </div>
       )}
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <nav className="mt-6 flex items-center justify-between">
-          <div className="text-base text-gray-700">
-            Showing <span className="font-medium">{(currentPage - 1) * itemsPerPage + 1}</span> to{' '}
-            <span className="font-medium">{Math.min(currentPage * itemsPerPage, filteredDetections.length)}</span> of{' '}
-            <span className="font-medium">{filteredDetections.length}</span> results
+        <div className="flex items-center justify-between border-t border-slate-800 pt-4">
+          <div className="text-sm text-slate-400">
+            Showing <span className="font-medium text-slate-300">{(currentPage - 1) * itemsPerPage + 1}</span> to{' '}
+            <span className="font-medium text-slate-300">{Math.min(currentPage * itemsPerPage, filteredDetections.length)}</span> of{' '}
+            <span className="font-medium text-slate-300">{filteredDetections.length}</span> results
           </div>
           <div className="flex gap-2">
             <button
               onClick={() => changePage(currentPage - 1)}
               disabled={currentPage === 1}
-              className={`px-4 py-2 border border-gray-300 text-base font-medium rounded-lg text-gray-700 bg-white transition-colors ${
-                currentPage === 1 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100'
-              }`}
+              className={`px-4 py-2 border border-slate-700 text-sm font-medium rounded-lg transition-all ${currentPage === 1
+                ? 'bg-slate-900/30 text-slate-600 border-slate-800 cursor-not-allowed'
+                : 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white hover:border-slate-600'
+                }`}
             >
               Previous
             </button>
             <button
               onClick={() => changePage(currentPage + 1)}
               disabled={currentPage >= totalPages}
-              className={`px-4 py-2 border border-gray-300 text-base font-medium rounded-lg text-gray-700 bg-white transition-colors ${
-                currentPage >= totalPages ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100'
-              }`}
+              className={`px-4 py-2 border border-slate-700 text-sm font-medium rounded-lg transition-all ${currentPage >= totalPages
+                ? 'bg-slate-900/30 text-slate-600 border-slate-800 cursor-not-allowed'
+                : 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white hover:border-slate-600'
+                }`}
             >
               Next
             </button>
           </div>
-        </nav>
+        </div>
       )}
     </div>
   );
