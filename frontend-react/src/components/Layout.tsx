@@ -25,6 +25,7 @@ export default function Layout() {
     { path: '/threats', label: 'Threat Monitor' },
     { path: '/events', label: 'Security Events' },
     { path: '/detections', label: 'Detections' },
+    { path: '/defense', label: '🛡️ Defense Center' },
     { path: '/chat', label: 'Security Assistant' },
   ];
 

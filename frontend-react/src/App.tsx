@@ -8,6 +8,7 @@ import AskAI from './pages/AskAI';
 import Threats from './pages/Threats';
 import Analysis from './pages/Analysis';
 import Chat from './pages/Chat';
+import Defense from './pages/Defense';
 import './App.css';
 
 function App() {
@@ -23,6 +24,7 @@ function App() {
           <Route path="events" element={<Events />} />
           <Route path="detections" element={<Detections />} />
           <Route path="agents" element={<Agents />} />
+          <Route path="defense" element={<Defense />} />
           <Route path="ask" element={<AskAI />} />
         </Route>
       </Routes>

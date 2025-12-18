@@ -14,13 +14,44 @@ from pydantic import BaseModel
 import asyncpg
 import httpx
 import uuid
+import ipaddress
 from datetime import datetime
 
+
+def classify_ip_origin(ip_str: str) -> tuple[str, str]:
+    """
+    Classify an IP address as internal or external.
+    Returns (emoji_indicator, label) tuple.
+    
+    Internal (RFC1918 private ranges):
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+    - 127.0.0.0/8 (loopback)
+    - Docker networks (172.17-31.x.x)
+    
+    External: Everything else (public internet)
+    """
+    try:
+        ip = ipaddress.ip_address(ip_str)
+        if ip.is_private or ip.is_loopback or ip.is_link_local:
+            return ("🏠", "INTERNAL")
+        else:
+            return ("🌐", "EXTERNAL")
+    except ValueError:
+        # Not a valid IP (might be a hostname)
+        if ip_str in ['localhost', '127.0.0.1', 'local']:
+            return ("🏠", "INTERNAL")
+        # Check for common internal hostnames
+        if any(x in ip_str.lower() for x in ['local', 'internal', 'intranet', 'lan']):
+            return ("🏠", "INTERNAL")
+        return ("❓", "UNKNOWN")
+
 # Configuration
-MODEL_SERVER_URL = os.getenv("MODEL_SERVER_URL", "http://model-server:11434")
+MODEL_SERVER_URL = os.getenv("MODEL_SERVER_URL") or "http://model-server:11434"
 
 # Import routers
-from app.routers import scans, agents
+from app.routers import scans, agents, defense_actions
 
 # Create FastAPI app
 app = FastAPI(title="Defense AI Backend")
@@ -171,17 +202,35 @@ async def ingest_event(event: EventIn):
                             alerts = details['alerts'][:2]
                             alert_text = '; '.join([a.get('signature', str(a)) for a in alerts if isinstance(a, dict)])
                             more = f" (+{len(details['alerts'])-2} more)" if len(details['alerts']) > 2 else ""
-                            summary = f"IDS alerts: {alert_text}{more}"
+                            # Get source IP for origin classification
+                            src_ip = None
+                            if alerts and isinstance(alerts[0], dict):
+                                src_ip = alerts[0].get('src_ip') or alerts[0].get('source_ip')
+                            if src_ip:
+                                origin_emoji, origin_label = classify_ip_origin(src_ip)
+                                summary = f"{origin_emoji} [{origin_label}] IDS alerts from {src_ip}: {alert_text}{more}"
+                            else:
+                                summary = f"IDS alerts: {alert_text}{more}"
                         elif 'ports' in details:
                             ports = details['ports']
                             address = details.get('address', 'target')
+                            # Get scanner source IP for origin classification
+                            scanner_ip = details.get('scanner_ip') or details.get('source_ip') or event.payload.get('scanner_ip')
+                            origin_indicator = ""
+                            if scanner_ip:
+                                origin_emoji, origin_label = classify_ip_origin(scanner_ip)
+                                origin_indicator = f"{origin_emoji} [{origin_label}] "
+                            elif address:
+                                # Classify the target if no scanner IP available
+                                origin_emoji, origin_label = classify_ip_origin(address)
+                                origin_indicator = f"Target: {origin_emoji} "
                             # Format port list
                             if len(ports) <= 5:
                                 port_list = ', '.join([f"{p.get('port', p)}/{p.get('protocol', 'tcp')}" if isinstance(p, dict) else str(p) for p in ports])
-                                summary = f"Port scan on {address}: {port_list} (Source: {event.source})"
+                                summary = f"{origin_indicator}Port scan on {address}: {port_list} (Source: {event.source})"
                             else:
                                 port_list = ', '.join([f"{p.get('port', p)}/{p.get('protocol', 'tcp')}" if isinstance(p, dict) else str(p) for p in ports[:5]])
-                                summary = f"Port scan on {address}: {port_list} (+{len(ports)-5} more) (Source: {event.source})"
+                                summary = f"{origin_indicator}Port scan on {address}: {port_list} (+{len(ports)-5} more) (Source: {event.source})"
                         elif 'live_hosts' in details:
                             # Ping sweep results
                             hosts = details['live_hosts']
@@ -224,6 +273,22 @@ async def ingest_event(event: EventIn):
                     event_id, summary, score, category, json.dumps(event.payload)
                 )
                 print(f"Detection created with ID: {detection_id}")
+                
+                # Trigger autonomous defense for high-severity detections
+                try:
+                    from app.routers.defense_actions import trigger_autonomous_defense
+                    defense_result = await trigger_autonomous_defense(
+                        event_id=event_id,
+                        detection_id=detection_id,
+                        score=score,
+                        event_type=event.type,
+                        payload=event.payload,
+                        pool=app.state.pool
+                    )
+                    if defense_result:
+                        print(f"🛡️ Autonomous defense triggered: {defense_result}")
+                except Exception as defense_error:
+                    print(f"Error in autonomous defense: {defense_error}")
         
         return {"status": "received", "event": event.dict()}
     except Exception as e:
@@ -233,6 +298,7 @@ async def ingest_event(event: EventIn):
 # Include API routers
 app.include_router(scans.router)
 app.include_router(agents.router)
+app.include_router(defense_actions.router)
 
 @app.get("/detections")
 async def list_detections():
@@ -281,22 +347,66 @@ async def ask_model(req: AskIn):
     try:
         # Fetch recent context (detections)
         context_text = ""
+        # Consolidate all DB operations into one connection block
         try:
-            async with app.state.pool.acquire() as conn:
-                rows = await conn.fetch("""
-                    SELECT summary, category, score, created_at
-                    FROM detections
-                    ORDER BY created_at DESC
-                    LIMIT 10
-                """)
-                if rows:
-                    detections_list = "\n".join([f"- [{r['created_at']}] {r['category'].upper()}: {r['summary']} (Score: {r['score']})" for r in rows])
-                    context_text += f"\nRecent Security Detections:\n{detections_list}\n"
-                else:
-                    context_text += "\nRecent Security Detections: None recorded.\n"
-        except Exception as db_err:
-            print(f"Error fetching context: {db_err}")
-            context_text += "\nRecent Security Detections: Error retrieving data.\n"
+            async with app.state.pool.acquire(timeout=5.0) as conn:
+                # 1. Fetch Recent Context
+                try:
+                    rows = await conn.fetch("""
+                        SELECT summary, category, score, created_at
+                        FROM detections
+                        ORDER BY created_at DESC
+                        LIMIT 10
+                    """)
+                    if rows:
+                        detections_list = "\n".join([f"- [{r['created_at']}] {r['category'].upper()}: {r['summary']} (Score: {r['score']})" for r in rows])
+                        context_text += f"\nRecent Security Detections:\n{detections_list}\n"
+                    else:
+                        context_text += "\nRecent Security Detections: None recorded.\n"
+                except Exception as e:
+                    print(f"Error fetching detections: {e}")
+                    context_text += "\nRecent Security Detections: Error retrieving data.\n"
+
+                # 2. Fetch Ambiguous Detections
+                try:
+                    rows = await conn.fetch("""
+                        SELECT d.summary, d.category, d.score, d.created_at
+                        FROM detections d
+                        LEFT JOIN detection_feedback f ON d.id = f.detection_id
+                        WHERE d.score >= 0.2 AND d.score <= 0.8
+                        AND f.id IS NULL
+                        AND d.created_at > NOW() - INTERVAL '24 hours'
+                        ORDER BY d.created_at DESC
+                        LIMIT 5
+                    """)
+                    if rows:
+                        ambiguous_list = "\n".join([f"- [{r['created_at']}] {r['category'].upper()}: {r['summary']} (Score: {r['score']})" for r in rows])
+                        context_text += f"\nAmbiguous Detections (NEED USER GUIDANCE):\n{ambiguous_list}\n"
+                    else:
+                        context_text += "\nAmbiguous Detections: None.\n"
+                except Exception as e:
+                    print(f"Error fetching ambiguous detections: {e}")
+
+                # 3. Fetch Autonomous Actions
+                try:
+                    rows = await conn.fetch("""
+                        SELECT action_type, target, reason, status, created_at
+                        FROM defense_actions
+                        WHERE created_at > NOW() - INTERVAL '24 hours'
+                        ORDER BY created_at DESC
+                        LIMIT 5
+                    """)
+                    if rows:
+                        actions_list = "\n".join([f"- [{r['created_at']}] {r['action_type'].upper()} on {r['target']}: {r['reason']} (Status: {r['status']})" for r in rows])
+                        context_text += f"\nRecent Autonomous Defense Actions:\n{actions_list}\n"
+                    else:
+                        context_text += "\nRecent Autonomous Defense Actions: None.\n"
+                except Exception as e:
+                    print(f"Error fetching defense actions: {e}")
+
+        except Exception as pool_err:
+            print(f"Error acquiring DB connection: {pool_err}")
+            context_text += "\n[System Error: Database Unavailable]\n"
 
         # Fetch Active Agents (from in-memory store)
         try:
@@ -340,11 +450,49 @@ async def ask_model(req: AskIn):
         1. Analyzing security events and detections from the database.
         2. Deploying active scanner agents to investigate targets.
         3. Explaining security concepts and providing remediation advice.
+        4. Managing autonomous defense actions (blocking IPs, quarantining files).
+
+        CONFIDENCE & GUIDANCE PROTOCOL:
+        - **Ambiguous Detections**: If the context lists "Ambiguous Detections" (scores 0.2-0.8), you MUST explicitly ask the user for confirmation. Explain what was detected and ask if it is authorized activity (e.g., "I detected a port scan from 192.168.1.50. Is this a known device or authorized testing?").
+        - **High Confidence**: If you see "Recent Autonomous Defense Actions", report them to the user so they know you have already protected the system.
+        - **Low Confidence**: If a user asks about a potential threat and you are unsure, recommend a specific scan to gather more evidence before suggesting drastic actions like blocking.
 
         COMMANDS:
-        You can deploy agents by outputting a specific command pattern. active agents: nmap, clamav, lynis, chkrootkit, rkhunter, yara, suricata.
+        You can deploy agents by outputting a specific command pattern. Available scanners: 
+        - nmap (Port Scan - Network Monitor)
+        - suricata (IDS - Network Monitor)
+        - clamav (Malware Scan - Malware Scanner)
+        - yara (Malware Scan - Malware Scanner)
+        - lynis (Security Audit - Security Scanner)
+        - chkrootkit (Rootkit Scan - Security Scanner)
+        - rkhunter (Rootkit Scan - Security Scanner)
+        - tshark (Traffic Analysis - Network Intel)
+        - masscan (Fast Port Scan - Network Intel)
+        - arp-scan (Local Discovery - Network Intel)
+        - dns-enum (DNS Enumeration - Network Intel)
+        - ping-sweep (Live Host Discovery - Network Intel)
+
         Format: ACTION: SCAN target=<ip_or_host> scanner=<scanner_name>
         Example: ACTION: SCAN target=192.168.1.50 scanner=nmap
+
+        DEFENSE COMMANDS (for active threat response):
+        When you detect a threat that requires immediate action, or when the user requests a defensive action, use these commands:
+        
+        - ACTION: BLOCK_IP ip=<ip_address> reason=<reason>
+          Use when: Port scans detected, brute force attempts, IDS alerts from specific IP
+          Example: ACTION: BLOCK_IP ip=192.168.1.100 reason="Detected aggressive port scan"
+        
+        - ACTION: UNBLOCK_IP ip=<ip_address>
+          Use when: User requests to unblock a previously blocked IP
+          Example: ACTION: UNBLOCK_IP ip=192.168.1.100
+        
+        - ACTION: QUARANTINE_FILE path=<file_path> reason=<reason>
+          Use when: Malware detected in a file (clamav, yara detection)
+          Example: ACTION: QUARANTINE_FILE path=/tmp/malware.exe reason="ClamAV: Trojan.Generic"
+        
+        - ACTION: KILL_PROCESS pid=<process_id> reason=<reason>
+          Use when: Suspicious process needs to be terminated
+          Example: ACTION: KILL_PROCESS pid=1234 reason="Cryptominer process detected"
 
         RULES:
         - If the user explicitly asks to run a scan, YOU MUST EXECUTE IT immediately. Do not ask for permissions or reasons.
@@ -352,7 +500,40 @@ async def ask_model(req: AskIn):
         - Do NOT suggest commands unless you are actually triggering the ACTION.
         - Do NOT run a scan just to "analyze" results. If you are provided with scan results in the context, analyze values directly.
         - If a scan just finished, the results will be in your context. Read them and summarize. Do NOT run another scan (like lynis) unless the user specifically requested a follow-up compliance check.
-        - Be concise and professional.
+        - For 'tshark' and 'arp-scan', the 'target' parameter is required by the format but essentially ignored or used as a label, as these tools run on the local network interface. You can set target="local" or the network range.
+        
+        REPORT FORMATTING (CRITICAL):
+        When presenting scan results or analysis, ALWAYS use professional, detailed markdown formatting:
+        
+        1. **Use Headers**: Start with a main header (## 📊 Report Title) and organize with subheadings.
+        
+        2. **Use Tables**: Present statistics and data in markdown tables for clarity:
+           | Metric | Value |
+           |--------|-------|
+           | Total Packets | 88 |
+        
+        3. **Use Emoji Icons**: Add visual context with emojis (📊 📈 🔌 🔗 🌐 🔍 ✅ ❌ ⚠️).
+        
+        4. **Provide Analysis**: Always include a "Findings" or "Analysis" section explaining what the data means.
+        
+        5. **Give a Conclusion**: End with a clear status summary (e.g., "Network Status: CLEAN" or "⚠️ Issues Detected").
+        
+        6. **For tshark reports specifically**, include:
+           - Capture duration and time period
+           - Summary statistics (packets, bytes, data rate)
+           - Protocol breakdown table
+           - TCP/UDP conversations
+           - IP endpoints
+           - Security analysis (suspicious activity, port scans, etc.)
+           - Final conclusion on network status
+        
+        7. **For nmap reports**, include:
+           - Target summary
+           - Open ports table with service info
+           - OS detection results if available
+           - Security recommendations
+        
+        Be thorough, professional, and make reports visually impressive and easy to understand.
         """
 
         # Construct the user message with context embedded
@@ -444,6 +625,110 @@ Please answer based ONLY on the information above. If I listed specific malware 
                 parts = ai_content.split("ACTION: SCAN")
                 pre_text = parts[0].strip()
                 ai_content = f"{pre_text}{execution_msg}" if pre_text else execution_msg.strip()
+            
+            # PARSE DEFENSE ACTIONS
+            # Check for BLOCK_IP command
+            block_ip_match = re.search(r'ACTION: BLOCK_IP ip=(\S+)\s+reason="([^"]+)"', ai_content)
+            if block_ip_match:
+                ip = block_ip_match.group(1)
+                reason = block_ip_match.group(2)
+                print(f"🛡️ AI REQUESTED BLOCK_IP: IP={ip}, Reason={reason}")
+                
+                try:
+                    from app.routers.defense_actions import DefenseActionRequest
+                    action_result = await defense_actions.create_defense_action(
+                        DefenseActionRequest(
+                            action_type="block_ip",
+                            target=ip,
+                            reason=reason,
+                            executed_by="ai"
+                        )
+                    )
+                    execution_msg = f"\n\n🛡️ **Defense Action Executed**\n- Action: Block IP\n- Target: `{ip}`\n- Reason: {reason}\n- Status: {action_result.get('status', 'pending')}"
+                    parts = ai_content.split("ACTION: BLOCK_IP")
+                    pre_text = parts[0].strip()
+                    ai_content = f"{pre_text}{execution_msg}"
+                except Exception as exc:
+                    print(f"Error executing BLOCK_IP: {exc}")
+                    parts = ai_content.split("ACTION: BLOCK_IP")
+                    ai_content = f"{parts[0].strip()}\n\n[SYSTEM] Defense action failed: {exc}"
+            
+            # Check for UNBLOCK_IP command
+            unblock_ip_match = re.search(r'ACTION: UNBLOCK_IP ip=(\S+)', ai_content)
+            if unblock_ip_match:
+                ip = unblock_ip_match.group(1)
+                print(f"🛡️ AI REQUESTED UNBLOCK_IP: IP={ip}")
+                
+                try:
+                    from app.routers.defense_actions import DefenseActionRequest
+                    action_result = await defense_actions.create_defense_action(
+                        DefenseActionRequest(
+                            action_type="unblock_ip",
+                            target=ip,
+                            reason="User/AI requested unblock",
+                            executed_by="ai"
+                        )
+                    )
+                    execution_msg = f"\n\n🛡️ **Defense Action Executed**\n- Action: Unblock IP\n- Target: `{ip}`\n- Status: {action_result.get('status', 'pending')}"
+                    parts = ai_content.split("ACTION: UNBLOCK_IP")
+                    pre_text = parts[0].strip()
+                    ai_content = f"{pre_text}{execution_msg}"
+                except Exception as exc:
+                    print(f"Error executing UNBLOCK_IP: {exc}")
+                    parts = ai_content.split("ACTION: UNBLOCK_IP")
+                    ai_content = f"{parts[0].strip()}\n\n[SYSTEM] Defense action failed: {exc}"
+            
+            # Check for QUARANTINE_FILE command
+            quarantine_match = re.search(r'ACTION: QUARANTINE_FILE path=(\S+)\s+reason="([^"]+)"', ai_content)
+            if quarantine_match:
+                path = quarantine_match.group(1)
+                reason = quarantine_match.group(2)
+                print(f"🛡️ AI REQUESTED QUARANTINE_FILE: Path={path}, Reason={reason}")
+                
+                try:
+                    from app.routers.defense_actions import DefenseActionRequest
+                    action_result = await defense_actions.create_defense_action(
+                        DefenseActionRequest(
+                            action_type="quarantine_file",
+                            target=path,
+                            reason=reason,
+                            executed_by="ai"
+                        )
+                    )
+                    execution_msg = f"\n\n🛡️ **Defense Action Executed**\n- Action: Quarantine File\n- Target: `{path}`\n- Reason: {reason}\n- Status: {action_result.get('status', 'pending')}"
+                    parts = ai_content.split("ACTION: QUARANTINE_FILE")
+                    pre_text = parts[0].strip()
+                    ai_content = f"{pre_text}{execution_msg}"
+                except Exception as exc:
+                    print(f"Error executing QUARANTINE_FILE: {exc}")
+                    parts = ai_content.split("ACTION: QUARANTINE_FILE")
+                    ai_content = f"{parts[0].strip()}\n\n[SYSTEM] Defense action failed: {exc}"
+            
+            # Check for KILL_PROCESS command
+            kill_match = re.search(r'ACTION: KILL_PROCESS pid=(\d+)\s+reason="([^"]+)"', ai_content)
+            if kill_match:
+                pid = kill_match.group(1)
+                reason = kill_match.group(2)
+                print(f"🛡️ AI REQUESTED KILL_PROCESS: PID={pid}, Reason={reason}")
+                
+                try:
+                    from app.routers.defense_actions import DefenseActionRequest
+                    action_result = await defense_actions.create_defense_action(
+                        DefenseActionRequest(
+                            action_type="kill_process",
+                            target=pid,
+                            reason=reason,
+                            executed_by="ai"
+                        )
+                    )
+                    execution_msg = f"\n\n🛡️ **Defense Action Executed**\n- Action: Kill Process\n- Target PID: `{pid}`\n- Reason: {reason}\n- Status: {action_result.get('status', 'pending')}"
+                    parts = ai_content.split("ACTION: KILL_PROCESS")
+                    pre_text = parts[0].strip()
+                    ai_content = f"{pre_text}{execution_msg}"
+                except Exception as exc:
+                    print(f"Error executing KILL_PROCESS: {exc}")
+                    parts = ai_content.split("ACTION: KILL_PROCESS")
+                    ai_content = f"{parts[0].strip()}\n\n[SYSTEM] Defense action failed: {exc}"
             
             return {"response": ai_content}
             

@@ -22,7 +22,7 @@ services:
     ports:
       - "5434:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d defense"]
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d defense" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -63,7 +63,7 @@ services:
     environment:
       - API_URL=http://backend:8000
       - AGENT_TYPE=network
-    command: ["python", "-u", "/app/specialized_agent.py", "network"]
+    command: [ "python", "-u", "/app/specialized_agent.py", "network" ]
     cap_add:
       - NET_ADMIN
       - NET_RAW
@@ -80,7 +80,7 @@ services:
     environment:
       - API_URL=http://backend:8000
       - AGENT_TYPE=network_intel
-    command: ["python", "-u", "/app/specialized_agent.py", "network_intel"]
+    command: [ "python", "-u", "/app/specialized_agent.py", "network_intel" ]
     cap_add:
       - NET_ADMIN
       - NET_RAW
@@ -96,11 +96,11 @@ services:
     environment:
       - API_URL=http://backend:8000
       - AGENT_TYPE=malware
-    command: ["python", "-u", "/app/specialized_agent.py", "malware"]
+    command: [ "python", "-u", "/app/specialized_agent.py", "malware" ]
     volumes:
       # - /:/host_wsl:ro            # REMOVED: Too broad
       # - C:/:/host_windows:ro      # REMOVED: Too broad
-      - ./scans:/host_wsl:ro        # Restricted to scans directory for now
+      - ./scans:/host_wsl:ro # Restricted to scans directory for now
       - /var/run/docker.sock:/var/run/docker.sock # Kept for malware scanner but flagged
     restart: unless-stopped
 
@@ -114,12 +114,33 @@ services:
     environment:
       - API_URL=http://backend:8000
       - AGENT_TYPE=security_audit
-    command: ["python", "-u", "/app/specialized_agent.py", "security_audit"]
+    command: [ "python", "-u", "/app/specialized_agent.py", "security_audit" ]
     volumes:
       - /etc:/etc:ro
       - /var/log:/var/log:ro
-      - /:/host_wsl:ro            # Mount WSL root to /host_wsl
-      - C:/:/host_windows:ro      # Mount Windows C drive to /host_windows
+      - /:/host_wsl:ro # Mount WSL root to /host_wsl
+      - C:/:/host_windows:ro # Mount Windows C drive to /host_windows
+    restart: unless-stopped
+
+  # Defense Agent (Autonomous Defense Actions)
+  defense-agent:
+    build: ./scanners
+    container_name: defense-agent
+    hostname: defense-agent
+    depends_on:
+      - backend
+    environment:
+      - API_URL=http://localhost:8000
+      - QUARANTINE_PATH=/quarantine
+    command: [ "python", "-u", "/app/defense_agent.py" ]
+    cap_add:
+      - NET_ADMIN # For iptables firewall management
+      - SYS_PTRACE # For process management
+    network_mode: "host" # Required for firewall rules to affect host
+    volumes:
+      - quarantine_data:/quarantine
+      - /var/run/docker.sock:/var/run/docker.sock
+    privileged: true # Required for iptables
     restart: unless-stopped
 
   # Legacy all-in-one scanner (optional, can be removed)
@@ -139,12 +160,12 @@ services:
       - NET_RAW
     restart: unless-stopped
     profiles:
-      - legacy  # Only start with --profile legacy
+      - legacy # Only start with --profile legacy
 
   clamav:
     image: clamav/clamav:latest
     container_name: clamav
-    command: tail -f /dev/null   # idle, waits for manual trigger
+    command: tail -f /dev/null # idle, waits for manual trigger
     volumes:
       - ./scans:/scans
     depends_on:
@@ -153,11 +174,11 @@ services:
   tshark:
     image: ubuntu:22.04
     container_name: tshark
-    network_mode: "host"   # so it can sniff real traffic
+    network_mode: "host" # so it can sniff real traffic
     cap_add:
       - NET_ADMIN
       - NET_RAW
-    command: 
+    command:
       - /bin/bash
       - -c
       - |
@@ -171,7 +192,7 @@ services:
   nmap:
     image: docker.io/instrumentisto/nmap:latest
     container_name: nmap
-    command: tail -f /dev/null   # idle
+    command: tail -f /dev/null # idle
     depends_on:
       - backend
 
@@ -188,4 +209,6 @@ services:
 volumes:
   db_data:
   ollama_data:
+  quarantine_data:
+
 

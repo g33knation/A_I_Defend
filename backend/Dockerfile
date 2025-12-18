@@ -21,9 +21,9 @@ COPY app/init.sql /app/init.sql
 
 # Create a startup script
 RUN echo '#!/bin/bash\n\
-# Wait for PostgreSQL to be ready\nuntil PGPASSWORD=$DB_PASSWORD psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -c "SELECT 1" > /dev/null 2>&1; do\n  echo "Waiting for PostgreSQL to be ready..."\n  sleep 1\ndone\n\n# Initialize the database\n\
-echo "Initializing database..."\n\
-PG_PASSWORD=$DB_PASSWORD psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -f /app/init.sql\n\n# Start the application\nexec uvicorn app.main:app --host 0.0.0.0 --port 8000\n' > /app/startup.sh \
+    # Wait for PostgreSQL to be ready\nuntil PGPASSWORD=$DB_PASSWORD psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -c "SELECT 1" > /dev/null 2>&1; do\n  echo "Waiting for PostgreSQL to be ready..."\n  sleep 1\ndone\n\n# Initialize the database\n\
+    echo "Initializing database..."\n\
+    PGPASSWORD=$DB_PASSWORD psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -f /app/init.sql\n\n# Start the application\nexec uvicorn app.main:app --host 0.0.0.0 --port 8000\n' > /app/startup.sh \
     && chmod +x /app/startup.sh
 
 # Set environment variables
