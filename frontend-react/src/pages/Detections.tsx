@@ -25,9 +25,9 @@ export default function Detections() {
       const matchesSearch = JSON.stringify(detection).toLowerCase().includes(searchQuery.toLowerCase());
       let matchesStatus = true;
       if (selectedStatus === 'new') {
-        matchesStatus = !(detection as any).feedback;
+        matchesStatus = !detection.feedback;
       } else if (selectedStatus !== 'all') {
-        matchesStatus = (detection as any).feedback === selectedStatus;
+        matchesStatus = detection.feedback === selectedStatus;
       }
       return matchesSearch && matchesStatus;
     });
@@ -218,23 +218,27 @@ export default function Detections() {
                   </div>
                 )}
 
-                {/* Feedback buttons */}
-                {!detection.feedback && (
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => handleFeedback(detection.id, 'confirmed_threat')}
-                      className="flex-1 px-3 py-1.5 text-xs font-medium rounded-lg text-white bg-red-600/80 hover:bg-red-600 transition-colors border border-red-500/30"
-                    >
-                      Confirm Threat
-                    </button>
-                    <button
-                      onClick={() => handleFeedback(detection.id, 'false_positive')}
-                      className="flex-1 px-3 py-1.5 text-xs font-medium rounded-lg text-slate-300 bg-slate-800 hover:bg-slate-700 transition-colors border border-slate-700"
-                    >
-                      False Positive
-                    </button>
-                  </div>
-                )}
+                {/* Feedback buttons - Always visible so user can switch */}
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleFeedback(detection.id, 'confirmed_threat')}
+                    className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${detection.feedback === 'confirmed_threat'
+                        ? 'bg-red-600 text-white border-red-500 shadow-lg shadow-red-500/20'
+                        : 'text-slate-400 bg-slate-900/50 hover:bg-slate-800 border border-slate-700/50'
+                      }`}
+                  >
+                    Confirm Threat
+                  </button>
+                  <button
+                    onClick={() => handleFeedback(detection.id, 'false_positive')}
+                    className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${detection.feedback === 'false_positive'
+                        ? 'bg-yellow-600/80 text-white border-yellow-500 shadow-lg shadow-yellow-500/20'
+                        : 'text-slate-400 bg-slate-900/50 hover:bg-slate-800 border border-slate-700/50'
+                      }`}
+                  >
+                    False Positive
+                  </button>
+                </div>
               </div>
             );
           })}

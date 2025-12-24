@@ -10,7 +10,13 @@ import {
   Clock,
   ChevronDown,
   ChevronUp,
-  FileText
+  FileText,
+  Shield,
+  Zap,
+  Target,
+  ShieldAlert,
+  ShieldCheck,
+  Ban
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -127,20 +133,61 @@ const EventItem = ({ event, formatTime }: { event: any, formatTime: any }) => {
   );
 };
 
+const DefenseActionItem = ({ action, formatTime }: { action: any, formatTime: any }) => {
+  return (
+    <div className="p-4 border-b border-slate-800/50 last:border-0 hover:bg-slate-800/20 transition-colors">
+      <div className="flex items-start justify-between">
+        <div className="flex items-start gap-3">
+          <div className={`p-2 rounded-lg ${action.action_type.includes('block') ? 'bg-red-500/10 text-red-400' :
+              action.action_type.includes('quarantine') ? 'bg-orange-500/10 text-orange-400' :
+                'bg-blue-500/10 text-blue-400'
+            }`}>
+            {action.action_type.includes('block') ? <Ban className="w-4 h-4" /> :
+              action.action_type.includes('quarantine') ? <ShieldAlert className="w-4 h-4" /> :
+                <Shield className="w-4 h-4" />}
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-medium text-slate-200 uppercase tracking-tight">
+                {action.action_type.replace(/_/g, ' ')}
+              </p>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded border border-slate-700 bg-slate-800 text-slate-400 font-mono`}>
+                {action.status.toUpperCase()}
+              </span>
+            </div>
+            <p className="text-xs text-slate-400 mt-0.5">Target: <code className="text-slate-300 bg-slate-900 px-1 rounded">{action.target}</code></p>
+            <p className="text-xs text-slate-500 mt-1 line-clamp-1">{action.reason}</p>
+          </div>
+        </div>
+        <div className="text-[10px] text-slate-500 font-mono flex items-center">
+          <Clock className="w-3 h-3 mr-1" />
+          {formatTime(action.created_at)}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export default function Dashboard() {
-  const { stats, events, detections, agents, fetchEvents, fetchDetections, fetchAgents, purgeEvents } = useDefenseStore();
+  const {
+    stats, events, detections, agents, defenseActions, defenseStats,
+    fetchEvents, fetchDetections, fetchAgents, fetchDefenseActions, fetchDefenseStats,
+    purgeEvents, getThreatLevel, getActiveThreatsCount, getThreatStats
+  } = useDefenseStore();
 
   useEffect(() => {
-    fetchEvents();
-    fetchDetections();
-    fetchAgents();
-    const interval = setInterval(() => {
+    const fetchData = () => {
       fetchEvents();
       fetchDetections();
       fetchAgents();
-    }, 5000);
+      fetchDefenseActions();
+      fetchDefenseStats();
+    };
+
+    fetchData();
+    const interval = setInterval(fetchData, 5000);
     return () => clearInterval(interval);
-  }, [fetchEvents, fetchDetections, fetchAgents]);
+  }, [fetchEvents, fetchDetections, fetchAgents, fetchDefenseActions, fetchDefenseStats]);
 
   const recentDetections = detections.slice(0, 5);
   const recentEvents = events.slice(0, 5);
@@ -160,13 +207,35 @@ export default function Dashboard() {
 
   const getDetectionBadgeClass = (type: string) => {
     const typeMap: Record<string, string> = {
-      critical: 'bg-red-500/20 text-red-400 border-red-500/30',
+      critical: 'bg-red-500/20 text-red-400 border-red-500/30 shadow-[0_0_8px_rgba(239,68,68,0.1)]',
       high: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
       medium: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
       low: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
       info: 'bg-slate-500/20 text-slate-400 border-slate-500/30',
     };
     return typeMap[type?.toLowerCase()] || 'bg-slate-500/20 text-slate-400 border-slate-500/30';
+  };
+
+  const threatLevel = getThreatLevel();
+  const activeThreats = getActiveThreatsCount();
+  const threatStats = getThreatStats();
+
+  const getThreatLevelColor = (level: string) => {
+    switch (level) {
+      case 'CRITICAL': return 'text-red-500';
+      case 'HIGH': return 'text-orange-500';
+      case 'MEDIUM': return 'text-yellow-500';
+      default: return 'text-emerald-500';
+    }
+  };
+
+  const getThreatLevelBg = (level: string) => {
+    switch (level) {
+      case 'CRITICAL': return 'bg-red-500/10 border-red-500/20';
+      case 'HIGH': return 'bg-orange-500/10 border-orange-500/20';
+      case 'MEDIUM': return 'bg-yellow-500/10 border-yellow-500/20';
+      default: return 'bg-emerald-500/10 border-emerald-500/20';
+    }
   };
 
   return (
@@ -245,7 +314,65 @@ export default function Dashboard() {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="glass p-4 rounded-xl relative overflow-hidden group">
+        {/* Threat Level */}
+        <div className={`glass p-4 rounded-xl border relative overflow-hidden group transition-all duration-300 ${getThreatLevelBg(threatLevel)}`}>
+          <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+            <ShieldAlert className={`w-16 h-16 ${getThreatLevelColor(threatLevel)}`} />
+          </div>
+          <div className="flex items-center gap-3 mb-2">
+            <div className={`p-2 rounded-lg bg-slate-900/50 ${getThreatLevelColor(threatLevel)}`}>
+              <Shield className="w-5 h-5" />
+            </div>
+            <span className="text-slate-400 text-sm font-medium">System Threat Level</span>
+          </div>
+          <p className={`text-3xl font-bold font-mono tracking-tighter ${getThreatLevelColor(threatLevel)}`}>
+            {threatLevel}
+          </p>
+          <div className="mt-2 flex gap-2">
+            <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Status: </span>
+            <span className={`text-[10px] font-bold uppercase ${getThreatLevelColor(threatLevel)}`}>
+              {threatLevel === 'LOW' ? 'Secured' : 'Attention Required'}
+            </span>
+          </div>
+        </div>
+
+        {/* Active Threats */}
+        <div className="glass p-4 rounded-xl relative overflow-hidden group border border-slate-800/50">
+          <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+            <Zap className="w-16 h-16 text-orange-500" />
+          </div>
+          <div className="flex items-center gap-3 mb-2">
+            <div className="p-2 rounded-lg bg-orange-500/10 text-orange-400">
+              <Zap className="w-5 h-5" />
+            </div>
+            <span className="text-slate-400 text-sm font-medium">Active Threats</span>
+          </div>
+          <p className="text-3xl font-bold text-white font-mono">{activeThreats}</p>
+          <div className="mt-2 text-[10px] text-slate-500 flex gap-2 font-mono">
+            <span className="text-red-400">{threatStats.critical} Critical</span>
+            <span className="text-orange-400">{threatStats.warning} Warn</span>
+          </div>
+        </div>
+
+        {/* Blocked IPs */}
+        <div className="glass p-4 rounded-xl relative overflow-hidden group border border-slate-800/50">
+          <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+            <Ban className="w-16 h-16 text-indigo-500" />
+          </div>
+          <div className="flex items-center gap-3 mb-2">
+            <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-400">
+              <Ban className="w-5 h-5" />
+            </div>
+            <span className="text-slate-400 text-sm font-medium">Active Blocks</span>
+          </div>
+          <p className="text-3xl font-bold text-white font-mono">{defenseStats?.active_ip_blocks || 0}</p>
+          <div className="mt-2 text-[10px] text-slate-500 font-mono">
+            Across all monitoring agents
+          </div>
+        </div>
+
+        {/* Total Events */}
+        <div className="glass p-4 rounded-xl relative overflow-hidden group border border-slate-800/50">
           <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
             <Activity className="w-16 h-16 text-blue-500" />
           </div>
@@ -254,7 +381,7 @@ export default function Dashboard() {
               <div className="p-2 rounded-lg bg-blue-500/10 text-blue-400">
                 <Activity className="w-5 h-5" />
               </div>
-              <span className="text-slate-400 text-sm font-medium">Total Events</span>
+              <span className="text-slate-400 text-sm font-medium">Monitoring events</span>
             </div>
             <button
               onClick={(e) => { e.stopPropagation(); if (confirm('Clear all events?')) purgeEvents(); }}
@@ -265,29 +392,19 @@ export default function Dashboard() {
             </button>
           </div>
           <p className="text-3xl font-bold text-white font-mono">{stats.totalEvents || 0}</p>
-        </div>
-
-        <div className="glass p-4 rounded-xl relative overflow-hidden group">
-          <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-            <AlertTriangle className="w-16 h-16 text-yellow-500" />
+          <div className="mt-2 text-[10px] text-slate-500 font-mono">
+            {defenseStats?.actions_last_24h || 0} defense actions in 24h
           </div>
-          <div className="flex items-center gap-3 mb-2">
-            <div className="p-2 rounded-lg bg-yellow-500/10 text-yellow-400">
-              <AlertTriangle className="w-5 h-5" />
-            </div>
-            <span className="text-slate-400 text-sm font-medium">False Positives</span>
-          </div>
-          <p className="text-3xl font-bold text-white font-mono">{stats.falsePositives || 0}</p>
         </div>
       </div>
 
       {/* Recent Activity */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="glass rounded-xl overflow-hidden border border-slate-800/50">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="glass rounded-xl overflow-hidden border border-slate-800/50 col-span-1 lg:col-span-1">
           <div className="p-4 border-b border-slate-800/50 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-orange-500" />
-              Recent Detections
+              <ShieldAlert className="w-5 h-5 text-orange-500" />
+              Recent detections
             </h2>
           </div>
           <div className="divide-y divide-slate-800/50">
@@ -303,10 +420,11 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="glass rounded-xl overflow-hidden border border-slate-800/50">
+        <div className="glass rounded-xl overflow-hidden border border-slate-800/50 col-span-1 lg:col-span-1">
           <div className="p-4 border-b border-slate-800/50 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-              Recent Events
+              <Target className="w-5 h-5 text-blue-500" />
+              Security events
             </h2>
           </div>
           <div className="divide-y divide-slate-800/50">
@@ -322,8 +440,27 @@ export default function Dashboard() {
             )}
           </div>
         </div>
+
+        <div className="glass rounded-xl overflow-hidden border border-slate-800/50 col-span-1 lg:col-span-1">
+          <div className="p-4 border-b border-slate-800/50 flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-indigo-500" />
+              Defense actions
+            </h2>
+          </div>
+          <div className="divide-y divide-slate-800/50 max-h-[500px] overflow-y-auto">
+            {defenseActions.length === 0 ? (
+              <div className="p-8 text-center text-slate-500">
+                <p className="text-sm">No defense actions taken</p>
+              </div>
+            ) : (
+              defenseActions.slice(0, 10).map((action) => (
+                <DefenseActionItem key={action.id} action={action} formatTime={formatTimeAgo} />
+              ))
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
 }
-

@@ -16,33 +16,10 @@ import {
     Activity
 } from 'lucide-react';
 
-interface DefenseAction {
-    id: number;
-    action_type: string;
-    target: string;
-    reason: string;
-    status: string;
-    executed_by: string;
-    created_at: string;
-    rolled_back_at: string | null;
-    event_type?: string;
-    detection_summary?: string;
-}
+import { useDefenseStore } from '../store/defenseStore';
+import type { DefenseAction } from '../store/defenseStore';
 
-interface DefenseConfig {
-    [key: string]: {
-        value: any;
-        description: string;
-    };
-}
-
-interface DefenseStats {
-    by_type_status: Array<{ action_type: string; status: string; count: number }>;
-    actions_last_24h: number;
-    active_ip_blocks: number;
-}
-
-const API_URL = 'http://localhost:8000';
+// API_URL removed - using store BASE_URL
 
 const ActionItem = ({ action, onRollback, formatTime }: {
     action: DefenseAction;
@@ -169,102 +146,52 @@ const ActionItem = ({ action, onRollback, formatTime }: {
     );
 };
 
+// ... (ActionItem interface and constants remain)
+
 export default function Defense() {
-    const [actions, setActions] = useState<DefenseAction[]>([]);
-    const [stats, setStats] = useState<DefenseStats | null>(null);
-    const [config, setConfig] = useState<DefenseConfig>({});
+    const {
+        defenseActions: actions,
+        defenseStats: stats,
+        defenseConfig: config,
+        fetchDefenseActions,
+        fetchDefenseStats,
+        fetchDefenseConfig,
+        updateDefenseConfig,
+        rollbackDefenseAction
+    } = useDefenseStore();
+
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState<string>('all');
 
-    const fetchActions = async () => {
-        try {
-            const url = filter === 'all'
-                ? `${API_URL}/api/defense/actions`
-                : `${API_URL}/api/defense/actions?status=${filter}`;
-            const res = await fetch(url);
-            if (res.ok) {
-                const data = await res.json();
-                setActions(data);
-            }
-        } catch (err) {
-            console.error('Error fetching defense actions:', err);
-        }
-    };
-
-    const fetchStats = async () => {
-        try {
-            const res = await fetch(`${API_URL}/api/defense/stats`);
-            if (res.ok) {
-                const data = await res.json();
-                setStats(data);
-            }
-        } catch (err) {
-            console.error('Error fetching defense stats:', err);
-        }
-    };
-
-    const fetchConfig = async () => {
-        try {
-            const res = await fetch(`${API_URL}/api/defense/config`);
-            if (res.ok) {
-                const data = await res.json();
-                setConfig(data);
-            }
-        } catch (err) {
-            console.error('Error fetching defense config:', err);
-        }
-    };
-
     const rollbackAction = async (actionId: number) => {
         if (!confirm('Are you sure you want to rollback this action?')) return;
-
-        try {
-            const res = await fetch(`${API_URL}/api/defense/actions/${actionId}/rollback`, {
-                method: 'POST'
-            });
-            if (res.ok) {
-                fetchActions();
-                fetchStats();
-            }
-        } catch (err) {
-            console.error('Error rolling back action:', err);
-        }
+        await rollbackDefenseAction(actionId);
     };
 
     const toggleAutonomousDefense = async () => {
         const currentValue = config.autonomous_defense_enabled?.value;
-        try {
-            const res = await fetch(`${API_URL}/api/defense/config`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    key: 'autonomous_defense_enabled',
-                    value: !currentValue
-                })
-            });
-            if (res.ok) {
-                fetchConfig();
-            }
-        } catch (err) {
-            console.error('Error updating config:', err);
-        }
+        await updateDefenseConfig('autonomous_defense_enabled', !currentValue);
     };
 
     useEffect(() => {
         const loadAll = async () => {
             setLoading(true);
-            await Promise.all([fetchActions(), fetchStats(), fetchConfig()]);
+            await Promise.all([
+                fetchDefenseActions(filter),
+                fetchDefenseStats(),
+                fetchDefenseConfig()
+            ]);
             setLoading(false);
         };
         loadAll();
 
         const interval = setInterval(() => {
-            fetchActions();
-            fetchStats();
+            fetchDefenseActions(filter);
+            fetchDefenseStats();
         }, 10000);
 
         return () => clearInterval(interval);
-    }, [filter]);
+    }, [filter, fetchDefenseActions, fetchDefenseStats, fetchDefenseConfig]);
 
     const formatTimeAgo = (dateString: string) => {
         if (!dateString) return 'Just now';
@@ -294,7 +221,7 @@ export default function Defense() {
                     <p className="text-slate-400 text-sm">Autonomous defense actions and threat response</p>
                 </div>
                 <button
-                    onClick={() => { fetchActions(); fetchStats(); fetchConfig(); }}
+                    onClick={() => { fetchDefenseActions(filter); fetchDefenseStats(); fetchDefenseConfig(); }}
                     className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors text-sm font-medium border border-slate-700"
                 >
                     <RefreshCw className="w-4 h-4" />
@@ -321,8 +248,8 @@ export default function Defense() {
                         <button
                             onClick={toggleAutonomousDefense}
                             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${isDefenseEnabled
-                                    ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
-                                    : 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
+                                ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
+                                : 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
                                 }`}
                         >
                             {isDefenseEnabled ? 'Disable' : 'Enable'}
@@ -374,8 +301,8 @@ export default function Defense() {
                         key={f}
                         onClick={() => setFilter(f)}
                         className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${filter === f
-                                ? 'bg-violet-500/20 text-violet-400 border border-violet-500/30'
-                                : 'bg-slate-800/50 text-slate-400 hover:text-slate-300 border border-slate-700/50'
+                            ? 'bg-violet-500/20 text-violet-400 border border-violet-500/30'
+                            : 'bg-slate-800/50 text-slate-400 hover:text-slate-300 border border-slate-700/50'
                             }`}
                     >
                         {f.replace('_', ' ').charAt(0).toUpperCase() + f.slice(1).replace('_', ' ')}

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-interface Event {
+export interface Event {
   id: string;
   type: string;
   source: string;
@@ -8,7 +8,7 @@ interface Event {
   payload?: any;
 }
 
-interface Detection {
+export interface Detection {
   id: string;
   summary: string;
   type: string;
@@ -20,14 +20,38 @@ interface Detection {
   category?: string;
 }
 
-interface Stats {
+export interface Stats {
   totalEvents: number;
   openDetections: number;
   threatsBlocked: number;
   falsePositives: number;
 }
 
-interface Scan {
+export interface DefenseAction {
+  id: number;
+  action_type: string;
+  target: string;
+  reason: string;
+  executed_by: string;
+  status: string;
+  created_at: string;
+  rolled_back_at?: string | null;
+  event_type?: string;
+  detection_summary?: string;
+  metadata?: any;
+}
+
+export interface DefenseStats {
+  actions_last_24h: number;
+  active_ip_blocks: number;
+  by_type_status: Array<{
+    action_type: string;
+    status: string;
+    count: number;
+  }>;
+}
+
+export interface Scan {
   scan_id: string;
   status: string;
   start_time: string;
@@ -36,7 +60,7 @@ interface Scan {
   error?: string;
 }
 
-interface Agent {
+export interface Agent {
   agent_id: string;
   hostname: string;
   ip_address: string;
@@ -54,6 +78,9 @@ interface DefenseState {
   detections: Detection[];
   scans: Scan[];
   agents: Agent[];
+  defenseActions: DefenseAction[];
+  defenseStats: DefenseStats | null;
+  defenseConfig: Record<string, any>;
   isLoading: boolean;
   error: string | null;
   stats: Stats;
@@ -65,6 +92,11 @@ interface DefenseState {
   fetchScans: () => Promise<void>;
   getScanResult: (scanId: string) => Promise<Scan>;
   fetchAgents: () => Promise<void>;
+  fetchDefenseActions: (status?: string) => Promise<void>;
+  fetchDefenseStats: () => Promise<void>;
+  fetchDefenseConfig: () => Promise<void>;
+  updateDefenseConfig: (key: string, value: any) => Promise<void>;
+  rollbackDefenseAction: (actionId: number) => Promise<void>;
   deployScan: (agentId: string, target: string, scanners: string[], paths?: string[]) => Promise<void>;
   registerAgent: (agentId: string, type: string, capabilities: string[]) => Promise<void>;
   purgeEvents: () => Promise<void>;
@@ -83,11 +115,21 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || (window.location.port === '
   ? 'http://localhost:8000'
   : window.location.origin);
 
+// Nervous System Security: Formalize trust between Brain and Legs/Frontend
+const BRAIN_API_KEY = "octopus-nervous-system-secret";
+const AUTH_HEADERS = {
+  'X-API-Key': BRAIN_API_KEY,
+  'Content-Type': 'application/json'
+};
+
 export const useDefenseStore = create<DefenseState>((set, get) => ({
   events: [],
   detections: [],
   scans: [],
   agents: [],
+  defenseActions: [],
+  defenseStats: null,
+  defenseConfig: {},
   isLoading: false,
   error: null,
   stats: {
@@ -100,7 +142,9 @@ export const useDefenseStore = create<DefenseState>((set, get) => ({
   fetchEvents: async () => {
     set({ isLoading: true, error: null });
     try {
-      const response = await fetch(`${API_BASE_URL}/events`);
+      const response = await fetch(`${API_BASE_URL}/events`, {
+        headers: { 'X-API-Key': BRAIN_API_KEY }
+      });
       if (!response.ok) throw new Error('Failed to fetch events');
       const data = await response.json();
       set({
@@ -122,7 +166,9 @@ export const useDefenseStore = create<DefenseState>((set, get) => ({
   fetchDetections: async () => {
     set({ isLoading: true, error: null });
     try {
-      const response = await fetch(`${API_BASE_URL}/detections`);
+      const response = await fetch(`${API_BASE_URL}/detections`, {
+        headers: { 'X-API-Key': BRAIN_API_KEY }
+      });
       if (!response.ok) throw new Error('Failed to fetch detections');
       const data = await response.json();
 
@@ -152,7 +198,7 @@ export const useDefenseStore = create<DefenseState>((set, get) => ({
     try {
       const response = await fetch(`${API_BASE_URL}/feedback`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({ detection_id: parseInt(detectionId), feedback }),
       });
       if (!response.ok) throw new Error('Failed to submit feedback');
@@ -166,6 +212,7 @@ export const useDefenseStore = create<DefenseState>((set, get) => ({
     try {
       const response = await fetch(`${API_BASE_URL}/detections`, {
         method: 'DELETE',
+        headers: { 'X-API-Key': BRAIN_API_KEY }
       });
       if (!response.ok) throw new Error('Failed to purge detections');
       await get().fetchDetections();
@@ -178,7 +225,7 @@ export const useDefenseStore = create<DefenseState>((set, get) => ({
     try {
       const response = await fetch(`${API_BASE_URL}/api/scans/start`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({ scanners, config }),
       });
       if (!response.ok) throw new Error('Failed to start scan');
@@ -192,7 +239,9 @@ export const useDefenseStore = create<DefenseState>((set, get) => ({
 
   fetchScans: async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/scans/`);
+      const response = await fetch(`${API_BASE_URL}/api/scans/`, {
+        headers: { 'X-API-Key': BRAIN_API_KEY }
+      });
       if (!response.ok) throw new Error('Failed to fetch scans');
       const data = await response.json();
       set({ scans: data });
@@ -203,7 +252,9 @@ export const useDefenseStore = create<DefenseState>((set, get) => ({
 
   getScanResult: async (scanId: string) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/scans/${scanId}`);
+      const response = await fetch(`${API_BASE_URL}/api/scans/${scanId}`, {
+        headers: { 'X-API-Key': BRAIN_API_KEY }
+      });
       if (!response.ok) throw new Error('Failed to fetch scan result');
       return await response.json();
     } catch (error) {
@@ -214,10 +265,84 @@ export const useDefenseStore = create<DefenseState>((set, get) => ({
 
   fetchAgents: async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/agents/`);
+      const response = await fetch(`${API_BASE_URL}/api/agents/`, {
+        headers: { 'X-API-Key': BRAIN_API_KEY }
+      });
       if (!response.ok) throw new Error('Failed to fetch agents');
       const data = await response.json();
       set({ agents: data });
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  fetchDefenseActions: async (status?: string) => {
+    try {
+      const url = status && status !== 'all'
+        ? `${API_BASE_URL}/api/defense/actions?status=${status}`
+        : `${API_BASE_URL}/api/defense/actions`;
+      const response = await fetch(url, {
+        headers: { 'X-API-Key': BRAIN_API_KEY }
+      });
+      if (!response.ok) throw new Error('Failed to fetch defense actions');
+      const data = await response.json();
+      set({ defenseActions: data });
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  fetchDefenseStats: async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/defense/stats`, {
+        headers: { 'X-API-Key': BRAIN_API_KEY }
+      });
+      if (!response.ok) throw new Error('Failed to fetch defense stats');
+      const data = await response.json();
+      set({ defenseStats: data });
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  fetchDefenseConfig: async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/defense/config`, {
+        headers: { 'X-API-Key': BRAIN_API_KEY }
+      });
+      if (!response.ok) throw new Error('Failed to fetch defense config');
+      const data = await response.json();
+      set({ defenseConfig: data });
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  updateDefenseConfig: async (key: string, value: any) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/defense/config`, {
+        method: 'PUT',
+        headers: AUTH_HEADERS,
+        body: JSON.stringify({ key, value }),
+      });
+      if (!response.ok) throw new Error('Failed to update defense config');
+      await get().fetchDefenseConfig();
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  rollbackDefenseAction: async (actionId: number) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/defense/actions/${actionId}/rollback`, {
+        method: 'POST',
+        headers: { 'X-API-Key': BRAIN_API_KEY }
+      });
+      if (!response.ok) throw new Error('Failed to rollback defense action');
+      await Promise.all([
+        get().fetchDefenseActions(),
+        get().fetchDefenseStats()
+      ]);
     } catch (error) {
       set({ error: error instanceof Error ? error.message : 'Unknown error' });
     }
@@ -236,7 +361,7 @@ export const useDefenseStore = create<DefenseState>((set, get) => ({
 
       const response = await fetch(`${API_BASE_URL}/api/agents/${agentId}/assign`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           targets: targets,
           scanners: scanners,
@@ -264,7 +389,7 @@ export const useDefenseStore = create<DefenseState>((set, get) => ({
     try {
       const response = await fetch(`${API_BASE_URL}/api/agents/register`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           agent_id: agentId,
           hostname: agentId, // Use agentId as hostname for manual registration
@@ -289,6 +414,7 @@ export const useDefenseStore = create<DefenseState>((set, get) => ({
     try {
       const response = await fetch(`${API_BASE_URL}/events`, {
         method: 'DELETE',
+        headers: { 'X-API-Key': BRAIN_API_KEY }
       });
       if (!response.ok) throw new Error('Failed to purge events');
       await get().fetchEvents();
@@ -298,19 +424,25 @@ export const useDefenseStore = create<DefenseState>((set, get) => ({
   },
 
   models: [],
-  selectedModel: 'llama2', // Default
+  selectedModel: 'hermes3:latest', // Default
   fetchModels: async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/models`);
+      const response = await fetch(`${API_BASE_URL}/models`, {
+        headers: { 'X-API-Key': BRAIN_API_KEY }
+      });
       if (response.ok) {
         const data = await response.json();
         if (data.models && data.models.length > 0) {
           set({ models: data.models });
-          // If current selected model is not in list, select first one
+
+          // Auto-select first model if current selection is invalid or empty
           const current = get().selectedModel;
-          if (!data.models.includes(current)) {
+          if (!current || !data.models.includes(current)) {
             set({ selectedModel: data.models[0] });
           }
+        } else {
+          // If no models available, empty the list and clear selection
+          set({ models: [], selectedModel: '' });
         }
       }
     } catch (error) {
@@ -323,7 +455,7 @@ export const useDefenseStore = create<DefenseState>((set, get) => ({
     try {
       const response = await fetch(`${API_BASE_URL}/ask`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({ query, model }),
       });
       if (!response.ok) throw new Error('Failed to get AI response');
