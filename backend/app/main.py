@@ -1,5 +1,6 @@
 import os
 import sys
+import re
 from pathlib import Path
 import json
 
@@ -9,6 +10,7 @@ if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
 from fastapi import FastAPI, Depends, Request, Response, HTTPException
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import asyncpg
@@ -18,20 +20,14 @@ import ipaddress
 from datetime import datetime
 
 
-def classify_ip_origin(ip_str: str) -> tuple[str, str]:
+def classify_ip_origin(ip_str: str, agent_identifiers: list[str] = []) -> tuple[str, str]:
     """
-    Classify an IP address as internal or external.
+    Classify an IP address as internal, external, or a known agent.
     Returns (emoji_indicator, label) tuple.
-    
-    Internal (RFC1918 private ranges):
-    - 10.0.0.0/8
-    - 172.16.0.0/12
-    - 192.168.0.0/16
-    - 127.0.0.0/8 (loopback)
-    - Docker networks (172.17-31.x.x)
-    
-    External: Everything else (public internet)
     """
+    if ip_str in agent_identifiers:
+        return ("🤖", "KNOWN AGENT")
+    
     try:
         ip = ipaddress.ip_address(ip_str)
         if ip.is_private or ip.is_loopback or ip.is_link_local:
@@ -49,12 +45,26 @@ def classify_ip_origin(ip_str: str) -> tuple[str, str]:
 
 # Configuration
 MODEL_SERVER_URL = os.getenv("MODEL_SERVER_URL") or "http://model-server:11434"
+# Nervous System Security: Formalize trust between Brain and Legs
+BRAIN_API_KEY = os.getenv("BRAIN_API_KEY") or "octopus-nervous-system-secret"
 
 # Import routers
 from app.routers import scans, agents, defense_actions
+from app.routers.defense_actions import DefenseActionRequest
 
 # Create FastAPI app
-app = FastAPI(title="Defense AI Backend")
+app = FastAPI(title="Defense AI Backend - Brain")
+
+from fastapi import Header
+
+async def verify_nervous_system_key(x_api_key: str = Header(None)):
+    """Security dependency to verify requests from agents (legs)."""
+    if not x_api_key or x_api_key != BRAIN_API_KEY:
+        raise HTTPException(
+            status_code=401,
+            detail="Brain Error: Unauthorized access. The nervous system link is unverified."
+        )
+    return x_api_key
 
 # CORS configuration - allow all origins for development
 app.add_middleware(
@@ -65,8 +75,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    print(f"Global exception caught: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal Server Error", "error": str(exc)},
+        headers={"Access-Control-Allow-Origin": "*"}  # Explicitly add for error cases
+    )
+
 class FeedbackIn(BaseModel):
     detection_id: int
+    feedback: str
 
 class AskIn(BaseModel):
     query: str
@@ -77,17 +97,28 @@ class EventIn(BaseModel):
     type: str
     payload: dict = {}
 
+class LogIn(BaseModel):
+    agent_id: str
+    log_level: str
+    message: str
+    context: dict = {}
+    timestamp: datetime = None
+
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database connection pool on startup."""
+    """Initialize database connection pool and global HTTP client on startup."""
+    # Initialize global HTTP client
+    app.state.client = httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=10.0))
+    
     try:
         # Get database URL from environment
         database_url = os.getenv("DATABASE_URL")
         if not database_url:
-            # Fallback for development if env var is missing (though it should be there)
-            database_url = "postgres://postgres:postgres@db:5432/defense"
-            print(f"WARNING: DATABASE_URL not set, using default: {database_url}")
+            # Fallback for local development ONLY IF NO ENV IS PROVIDED
+            # WARNING: In production, system will fail fast if URL is missing
+            database_url = "postgres://postgres:changeit@db:5432/defense"
+            print(f"WARNING: DATABASE_URL not set, using default development credentials")
         
         app.state.pool = await asyncpg.create_pool(
             dsn=database_url,
@@ -102,7 +133,6 @@ async def startup_event():
 # Endpoints
 @app.get("/events", response_model=list[dict])
 async def list_events():
-# ... (omitted lines)
 
     """List all security events."""
     try:
@@ -121,10 +151,28 @@ async def list_events():
         print(f"Error fetching events: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/events")
+@app.post("/logs", dependencies=[Depends(verify_nervous_system_key)])
+async def ingest_log(log: LogIn):
+    """Ingest a centralized log from an agent."""
+    try:
+        async with app.state.pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO agent_logs (agent_id, log_level, message, context, created_at)
+                VALUES ($1, $2, $3, $4, COALESCE($5::timestamp, NOW()))
+                """,
+                log.agent_id, log.log_level, log.message, json.dumps(log.context), log.timestamp
+            )
+            print(f"📝 Log received from {log.agent_id}: [{log.log_level}] {log.message}")
+        return {"status": "received"}
+    except Exception as e:
+        print(f"Error ingesting log: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/events", dependencies=[Depends(verify_nervous_system_key)])
 async def ingest_event(event: EventIn):
     """Ingest a new security event."""
-    print(f"Received event: source={event.source}, type={event.type}")
+    # print(f"Received event: source={event.source}, type={event.type}")
     try:
         async with app.state.pool.acquire() as conn:
             # Insert the event and get its ID
@@ -184,9 +232,23 @@ async def ingest_event(event: EventIn):
                 category = category_map.get(event.type, 'unknown')
                 summary = f"{event.source}: {event.type}"
                 
+                # Extract current agent IPs and hostnames for classification
+                agent_identifiers = []
+                for a in agents.agents.values():
+                    if a.get('ip_address'): agent_identifiers.append(a.get('ip_address'))
+                    if a.get('hostname'): agent_identifiers.append(a.get('hostname'))
+                
+                # Check if payload is a string or dict
+                payload_data = event.payload
+                if isinstance(payload_data, str):
+                    try:
+                        payload_data = json.loads(payload_data)
+                    except:
+                        pass
+                
                 # Extract more details from payload if available
-                if 'details' in event.payload:
-                    details = event.payload['details']
+                if isinstance(payload_data, dict) and 'details' in payload_data:
+                    details = payload_data['details']
                     if isinstance(details, dict):
                         if 'infected_files' in details:
                             files = details['infected_files'][:3]  # First 3 files
@@ -207,7 +269,7 @@ async def ingest_event(event: EventIn):
                             if alerts and isinstance(alerts[0], dict):
                                 src_ip = alerts[0].get('src_ip') or alerts[0].get('source_ip')
                             if src_ip:
-                                origin_emoji, origin_label = classify_ip_origin(src_ip)
+                                origin_emoji, origin_label = classify_ip_origin(src_ip, agent_identifiers)
                                 summary = f"{origin_emoji} [{origin_label}] IDS alerts from {src_ip}: {alert_text}{more}"
                             else:
                                 summary = f"IDS alerts: {alert_text}{more}"
@@ -215,14 +277,14 @@ async def ingest_event(event: EventIn):
                             ports = details['ports']
                             address = details.get('address', 'target')
                             # Get scanner source IP for origin classification
-                            scanner_ip = details.get('scanner_ip') or details.get('source_ip') or event.payload.get('scanner_ip')
+                            scanner_ip = details.get('scanner_ip') or details.get('source_ip') or event.payload.get('scanner_ip') or event.source
                             origin_indicator = ""
                             if scanner_ip:
-                                origin_emoji, origin_label = classify_ip_origin(scanner_ip)
+                                origin_emoji, origin_label = classify_ip_origin(scanner_ip, agent_identifiers)
                                 origin_indicator = f"{origin_emoji} [{origin_label}] "
                             elif address:
                                 # Classify the target if no scanner IP available
-                                origin_emoji, origin_label = classify_ip_origin(address)
+                                origin_emoji, origin_label = classify_ip_origin(address, agent_identifiers)
                                 origin_indicator = f"Target: {origin_emoji} "
                             # Format port list
                             if len(ports) <= 5:
@@ -296,19 +358,20 @@ async def ingest_event(event: EventIn):
         raise HTTPException(status_code=500, detail=str(e))
 
 # Include API routers
-app.include_router(scans.router)
-app.include_router(agents.router)
-app.include_router(defense_actions.router)
+# Include routers with Nervous System Security (verify requests from legs)
+app.include_router(scans.router, dependencies=[Depends(verify_nervous_system_key)])
+app.include_router(agents.router, dependencies=[Depends(verify_nervous_system_key)])
+app.include_router(defense_actions.router, dependencies=[Depends(verify_nervous_system_key)])
 
 @app.get("/detections")
 async def list_detections():
-    """List all detections."""
+    """List all detections with their feedback."""
     async with app.state.pool.acquire() as conn:
+        # Join with detection_feedback to get the latest feedback for each detection
         rows = await conn.fetch("""
-            SELECT d.*, COALESCE(json_agg(f) FILTER (WHERE f.id IS NOT NULL), '[]') as feedbacks
+            SELECT d.*, f.feedback
             FROM detections d
             LEFT JOIN detection_feedback f ON d.id = f.detection_id
-            GROUP BY d.id
             ORDER BY d.created_at DESC
             LIMIT 50
         """)
@@ -316,10 +379,17 @@ async def list_detections():
 
 @app.post("/feedback")
 async def submit_feedback(fb: FeedbackIn):
+    print(f"DEBUG: submit_feedback called for ID {fb.detection_id}")
     async with app.state.pool.acquire() as conn:
+        # Use detection_feedback table instead of updating detections table
+        # We use an UPSERT pattern to ensure we only have one feedback record per detection
         await conn.execute(
-            "UPDATE detections SET feedback=$1 WHERE id=$2",
-            fb.feedback, fb.detection_id
+            """
+            INSERT INTO detection_feedback (detection_id, feedback, created_at)
+            VALUES ($1, $2, NOW())
+            ON CONFLICT (detection_id) DO UPDATE SET feedback = EXCLUDED.feedback, created_at = NOW()
+            """,
+            fb.detection_id, fb.feedback
         )
     return {"status": "ok"}
 
@@ -558,180 +628,188 @@ Please answer based ONLY on the information above. If I listed specific malware 
         print(json.dumps(messages, indent=2))
         print(f"=" * 80)
 
-        async with httpx.AsyncClient() as client:
-            # Call Ollama's Chat API
-            ollama_url = f"{MODEL_SERVER_URL}/api/chat"
-            payload = {
-                "model": req.model,
-                "messages": messages,
-                "stream": False
-            }
+        # Use the global client initialized on startup
+        # We use a 600s timeout to allow for slow generation on CPU or under heavy load (e.g. Stable Diffusion)
+        # Call Ollama's Chat API
+        ollama_url = f"{MODEL_SERVER_URL}/api/chat"
+        payload = {
+            "model": req.model,
+            "messages": messages,
+            "stream": False
+        }
+        
+        response = await app.state.client.post(
+            ollama_url,
+            json=payload,
+            timeout=600.0
+        )
+        response.raise_for_status()
+        result = response.json()
             
-            response = await client.post(
-                ollama_url,
-                json=payload,
-                timeout=120.0
-            )
-            response.raise_for_status()
-            result = response.json()
+        ai_content = result.get("message", {}).get("content", "")
+        
+        # PARSE AND EXECUTE ACTIONS
+        action_match = re.search(r"ACTION: SCAN target=(\S+) scanner=(\S+)", ai_content)
+        if action_match:
+            target = action_match.group(1)
+            scanner_name = action_match.group(2)
+            print(f"AI REQUESTED SCAN: Target={target}, Scanner={scanner_name}")
             
-            ai_content = result.get("message", {}).get("content", "")
+            # Find a suitable agent
+            selected_agent_id = None
+            if agents.agents:
+                for agent_id, agent in agents.agents.items():
+                    if agent["status"] == "idle" and (scanner_name in agent["capabilities"] or "all" in agent["capabilities"]):
+                        selected_agent_id = agent_id
+                        break
             
-            # PARSE AND EXECUTE ACTIONS
-            import re
-            action_match = re.search(r"ACTION: SCAN target=(\S+) scanner=(\S+)", ai_content)
-            if action_match:
-                target = action_match.group(1)
-                scanner_name = action_match.group(2)
-                print(f"AI REQUESTED SCAN: Target={target}, Scanner={scanner_name}")
-                
-                # Find a suitable agent
-                selected_agent_id = None
-                if agents.agents:
-                    for agent_id, agent in agents.agents.items():
-                        if agent["status"] == "idle" and (scanner_name in agent["capabilities"] or "all" in agent["capabilities"]):
-                            selected_agent_id = agent_id
-                            break
-                
-                execution_msg = ""
-                if selected_agent_id:
-                    # Trigger the scan
-                    try:
-                        # Construct assignment object expected by assign_scan
-                        # We need to manually call the logic or simulate the request
-                        # Since assign_scan is an endpoint, we can abstract the logic or call it directly if we refactor.
-                        # For now, let's duplicate the assignment logic slightly for direct internal use
-                        
-                        assignment_id = str(uuid.uuid4())
-                        agents.agent_assignments[selected_agent_id] = {
-                            "assignment_id": assignment_id,
-                            "targets": [target],
-                            "scanners": [scanner_name],
-                            "config": {},
-                            "priority": 5,
-                            "assigned_at": datetime.utcnow().isoformat()
-                        }
-                        agents.agents[selected_agent_id]["current_assignment"] = assignment_id
-                        
-                        # Return special marker for frontend to render interactive bubble
-                        execution_msg = f"\n<<<SCAN_STARTED|id={assignment_id}|target={target}|scanner={scanner_name}>>>"
-                    except Exception as exc:
-                        execution_msg = f"\n\n[SYSTEM] Command Failed: Error assigning task: {exc}"
-                else:
-                    execution_msg = f"\n\n[SYSTEM] Command Failed: No idle agents found with capability '{scanner_name}'."
-                
-                # Strip the raw ACTION command from the output so user doesn't see it twice
-                # We keep the text BEFORE the action if any, and append our execution result/marker
-                parts = ai_content.split("ACTION: SCAN")
+            execution_msg = ""
+            if selected_agent_id:
+                # Trigger the scan
+                try:
+                    assignment_id = str(uuid.uuid4())
+                    agents.agent_assignments[selected_agent_id] = {
+                        "assignment_id": assignment_id,
+                        "targets": [target],
+                        "scanners": [scanner_name],
+                        "config": {},
+                        "priority": 5,
+                        "assigned_at": datetime.utcnow().isoformat()
+                    }
+                    agents.agents[selected_agent_id]["current_assignment"] = assignment_id
+                    
+                    # Return special marker for frontend to render interactive bubble
+                    execution_msg = f"\n<<<SCAN_STARTED|id={assignment_id}|target={target}|scanner={scanner_name}>>>"
+                except Exception as exc:
+                    execution_msg = f"\n\n[SYSTEM] Command Failed: Error assigning task: {exc}"
+            else:
+                execution_msg = f"\n\n[SYSTEM] Command Failed: No idle agents found with capability '{scanner_name}'."
+            
+            # Strip the raw ACTION command from the output so user doesn't see it twice
+            parts = ai_content.split("ACTION: SCAN")
+            pre_text = parts[0].strip()
+            ai_content = f"{pre_text}{execution_msg}" if pre_text else execution_msg.strip()
+        
+        # PARSE DEFENSE ACTIONS
+        # Check for BLOCK_IP command
+        block_ip_match = re.search(r'ACTION: BLOCK_IP ip=(\S+)\s+reason="([^"]+)"', ai_content)
+        if block_ip_match:
+            ip = block_ip_match.group(1)
+            reason = block_ip_match.group(2)
+            print(f"🛡️ AI REQUESTED BLOCK_IP: IP={ip}, Reason={reason}")
+            
+            try:
+                action_result = await defense_actions.create_defense_action(
+                    DefenseActionRequest(
+                        action_type="block_ip",
+                        target=ip,
+                        reason=reason,
+                        executed_by="ai"
+                    )
+                )
+                execution_msg = f"\n\n🛡️ **Defense Action Executed**\n- Action: Block IP\n- Target: `{ip}`\n- Reason: {reason}\n- Status: {action_result.get('status', 'pending')}"
+                parts = ai_content.split("ACTION: BLOCK_IP")
                 pre_text = parts[0].strip()
-                ai_content = f"{pre_text}{execution_msg}" if pre_text else execution_msg.strip()
+                ai_content = f"{pre_text}{execution_msg}"
+            except Exception as exc:
+                print(f"Error executing BLOCK_IP: {exc}")
+                parts = ai_content.split("ACTION: BLOCK_IP")
+                ai_content = f"{parts[0].strip()}\n\n[SYSTEM] Defense action failed: {exc}"
+        
+        # Check for UNBLOCK_IP command
+        unblock_ip_match = re.search(r'ACTION: UNBLOCK_IP ip=(\S+)', ai_content)
+        if unblock_ip_match:
+            ip = unblock_ip_match.group(1)
+            print(f"🛡️ AI REQUESTED UNBLOCK_IP: IP={ip}")
             
-            # PARSE DEFENSE ACTIONS
-            # Check for BLOCK_IP command
-            block_ip_match = re.search(r'ACTION: BLOCK_IP ip=(\S+)\s+reason="([^"]+)"', ai_content)
-            if block_ip_match:
-                ip = block_ip_match.group(1)
-                reason = block_ip_match.group(2)
-                print(f"🛡️ AI REQUESTED BLOCK_IP: IP={ip}, Reason={reason}")
-                
-                try:
-                    from app.routers.defense_actions import DefenseActionRequest
-                    action_result = await defense_actions.create_defense_action(
-                        DefenseActionRequest(
-                            action_type="block_ip",
-                            target=ip,
-                            reason=reason,
-                            executed_by="ai"
-                        )
+            try:
+                action_result = await defense_actions.create_defense_action(
+                    DefenseActionRequest(
+                        action_type="unblock_ip",
+                        target=ip,
+                        reason="User/AI requested unblock",
+                        executed_by="ai"
                     )
-                    execution_msg = f"\n\n🛡️ **Defense Action Executed**\n- Action: Block IP\n- Target: `{ip}`\n- Reason: {reason}\n- Status: {action_result.get('status', 'pending')}"
-                    parts = ai_content.split("ACTION: BLOCK_IP")
-                    pre_text = parts[0].strip()
-                    ai_content = f"{pre_text}{execution_msg}"
-                except Exception as exc:
-                    print(f"Error executing BLOCK_IP: {exc}")
-                    parts = ai_content.split("ACTION: BLOCK_IP")
-                    ai_content = f"{parts[0].strip()}\n\n[SYSTEM] Defense action failed: {exc}"
+                )
+                execution_msg = f"\n\n🛡️ **Defense Action Executed**\n- Action: Unblock IP\n- Target: `{ip}`\n- Status: {action_result.get('status', 'pending')}"
+                parts = ai_content.split("ACTION: UNBLOCK_IP")
+                pre_text = parts[0].strip()
+                ai_content = f"{pre_text}{execution_msg}"
+            except Exception as exc:
+                print(f"Error executing UNBLOCK_IP: {exc}")
+                parts = ai_content.split("ACTION: UNBLOCK_IP")
+                ai_content = f"{parts[0].strip()}\n\n[SYSTEM] Defense action failed: {exc}"
+        
+        # Check for QUARANTINE_FILE command
+        quarantine_match = re.search(r'ACTION: QUARANTINE_FILE path=(\S+)\s+reason="([^"]+)"', ai_content)
+        if quarantine_match:
+            path = quarantine_match.group(1)
+            reason = quarantine_match.group(2)
+            print(f"🛡️ AI REQUESTED QUARANTINE_FILE: Path={path}, Reason={reason}")
             
-            # Check for UNBLOCK_IP command
-            unblock_ip_match = re.search(r'ACTION: UNBLOCK_IP ip=(\S+)', ai_content)
-            if unblock_ip_match:
-                ip = unblock_ip_match.group(1)
-                print(f"🛡️ AI REQUESTED UNBLOCK_IP: IP={ip}")
-                
-                try:
-                    from app.routers.defense_actions import DefenseActionRequest
-                    action_result = await defense_actions.create_defense_action(
-                        DefenseActionRequest(
-                            action_type="unblock_ip",
-                            target=ip,
-                            reason="User/AI requested unblock",
-                            executed_by="ai"
-                        )
+            try:
+                action_result = await defense_actions.create_defense_action(
+                    DefenseActionRequest(
+                        action_type="quarantine_file",
+                        target=path,
+                        reason=reason,
+                        executed_by="ai"
                     )
-                    execution_msg = f"\n\n🛡️ **Defense Action Executed**\n- Action: Unblock IP\n- Target: `{ip}`\n- Status: {action_result.get('status', 'pending')}"
-                    parts = ai_content.split("ACTION: UNBLOCK_IP")
-                    pre_text = parts[0].strip()
-                    ai_content = f"{pre_text}{execution_msg}"
-                except Exception as exc:
-                    print(f"Error executing UNBLOCK_IP: {exc}")
-                    parts = ai_content.split("ACTION: UNBLOCK_IP")
-                    ai_content = f"{parts[0].strip()}\n\n[SYSTEM] Defense action failed: {exc}"
+                )
+                execution_msg = f"\n\n🛡️ **Defense Action Executed**\n- Action: Quarantine File\n- Target: `{path}`\n- Reason: {reason}\n- Status: {action_result.get('status', 'pending')}"
+                parts = ai_content.split("ACTION: QUARANTINE_FILE")
+                pre_text = parts[0].strip()
+                ai_content = f"{pre_text}{execution_msg}"
+            except Exception as exc:
+                print(f"Error executing QUARANTINE_FILE: {exc}")
+                parts = ai_content.split("ACTION: QUARANTINE_FILE")
+                ai_content = f"{parts[0].strip()}\n\n[SYSTEM] Defense action failed: {exc}"
+        
+        # Check for KILL_PROCESS command
+        kill_match = re.search(r'ACTION: KILL_PROCESS pid=(\d+)\s+reason="([^"]+)"', ai_content)
+        if kill_match:
+            pid = kill_match.group(1)
+            reason = kill_match.group(2)
+            print(f"🛡️ AI REQUESTED KILL_PROCESS: PID={pid}, Reason={reason}")
             
-            # Check for QUARANTINE_FILE command
-            quarantine_match = re.search(r'ACTION: QUARANTINE_FILE path=(\S+)\s+reason="([^"]+)"', ai_content)
-            if quarantine_match:
-                path = quarantine_match.group(1)
-                reason = quarantine_match.group(2)
-                print(f"🛡️ AI REQUESTED QUARANTINE_FILE: Path={path}, Reason={reason}")
-                
-                try:
-                    from app.routers.defense_actions import DefenseActionRequest
-                    action_result = await defense_actions.create_defense_action(
-                        DefenseActionRequest(
-                            action_type="quarantine_file",
-                            target=path,
-                            reason=reason,
-                            executed_by="ai"
-                        )
+            try:
+                action_result = await defense_actions.create_defense_action(
+                    DefenseActionRequest(
+                        action_type="kill_process",
+                        target=pid,
+                        reason=reason,
+                        executed_by="ai"
                     )
-                    execution_msg = f"\n\n🛡️ **Defense Action Executed**\n- Action: Quarantine File\n- Target: `{path}`\n- Reason: {reason}\n- Status: {action_result.get('status', 'pending')}"
-                    parts = ai_content.split("ACTION: QUARANTINE_FILE")
-                    pre_text = parts[0].strip()
-                    ai_content = f"{pre_text}{execution_msg}"
-                except Exception as exc:
-                    print(f"Error executing QUARANTINE_FILE: {exc}")
-                    parts = ai_content.split("ACTION: QUARANTINE_FILE")
-                    ai_content = f"{parts[0].strip()}\n\n[SYSTEM] Defense action failed: {exc}"
+                )
+                execution_msg = f"\n\n🛡️ **Defense Action Executed**\n- Action: Kill Process\n- Target PID: `{pid}`\n- Reason: {reason}\n- Status: {action_result.get('status', 'pending')}"
+                parts = ai_content.split("ACTION: KILL_PROCESS")
+                pre_text = parts[0].strip()
+                ai_content = f"{pre_text}{execution_msg}"
+            except Exception as exc:
+                print(f"Error executing KILL_PROCESS: {exc}")
+                parts = ai_content.split("ACTION: KILL_PROCESS")
+                ai_content = f"{parts[0].strip()}\n\n[SYSTEM] Defense action failed: {exc}"
+        
+        return {"response": ai_content}
             
-            # Check for KILL_PROCESS command
-            kill_match = re.search(r'ACTION: KILL_PROCESS pid=(\d+)\s+reason="([^"]+)"', ai_content)
-            if kill_match:
-                pid = kill_match.group(1)
-                reason = kill_match.group(2)
-                print(f"🛡️ AI REQUESTED KILL_PROCESS: PID={pid}, Reason={reason}")
-                
-                try:
-                    from app.routers.defense_actions import DefenseActionRequest
-                    action_result = await defense_actions.create_defense_action(
-                        DefenseActionRequest(
-                            action_type="kill_process",
-                            target=pid,
-                            reason=reason,
-                            executed_by="ai"
-                        )
-                    )
-                    execution_msg = f"\n\n🛡️ **Defense Action Executed**\n- Action: Kill Process\n- Target PID: `{pid}`\n- Reason: {reason}\n- Status: {action_result.get('status', 'pending')}"
-                    parts = ai_content.split("ACTION: KILL_PROCESS")
-                    pre_text = parts[0].strip()
-                    ai_content = f"{pre_text}{execution_msg}"
-                except Exception as exc:
-                    print(f"Error executing KILL_PROCESS: {exc}")
-                    parts = ai_content.split("ACTION: KILL_PROCESS")
-                    ai_content = f"{parts[0].strip()}\n\n[SYSTEM] Defense action failed: {exc}"
-            
-            return {"response": ai_content}
-            
+    except httpx.HTTPStatusError as e:
+        status_code = e.response.status_code
+        try:
+            error_detail = e.response.json().get("error", str(e))
+        except:
+            error_detail = str(e)
+        
+        print(f"Ollama API Error ({status_code}): {error_detail}")
+        raise HTTPException(
+            status_code=status_code if status_code != 404 else 400,
+            detail=f"Ollama Error: {error_detail}"
+        )
+    except httpx.RequestError as e:
+        print(f"Ollama Connection Error: {str(e)}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Ollama Connection Error: Unable to reach model server. {str(e)}"
+        )
     except Exception as e:
         print(f"Error querying Ollama: {str(e)}")
         raise HTTPException(
@@ -742,21 +820,28 @@ Please answer based ONLY on the information above. If I listed specific malware 
 @app.get("/models")
 async def list_models():
     """List available Ollama models."""
-    """List available Ollama models."""
     try:
-        async with httpx.AsyncClient() as client:
-            ollama_url = f"{MODEL_SERVER_URL}/api/tags"
-            response = await client.get(ollama_url, timeout=10.0)
-            if response.status_code == 200:
-                data = response.json()
-                # Extract model names
-                models = [model['name'] for model in data.get('models', [])]
-                return {"models": models}
-            return {"models": []}
+        ollama_url = f"{MODEL_SERVER_URL}/api/tags"
+        response = await app.state.client.get(ollama_url, timeout=10.0)
+        if response.status_code == 200:
+            data = response.json()
+            # Extract model names
+            models = [model['name'] for model in data.get('models', [])]
+            return {"models": models}
+        return {"models": []}
     except Exception as e:
         print(f"Error fetching models: {str(e)}")
-        # Return default models if Ollama is unreachable
-        return {"models": ["llama2", "mistral"]}
+        # Remove hardcoded fallbacks to strictly reflect Ollama state
+        return {"models": []}
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Close global resources on shutdown."""
+    if hasattr(app.state, "client"):
+        await app.state.client.aclose()
+    if hasattr(app.state, "pool"):
+        await app.state.pool.close()
 
 
 @app.get("/debug/prompt")

@@ -3,41 +3,20 @@ Specialized Agent Client - Supports network, malware, and security audit agents
 """
 
 import asyncio
-import httpx
-import socket
-import json
 import os
 import sys
-from datetime import datetime
 from typing import Dict, Any, List, Optional
+from octopus_leg import OctopusLeg
 
-
-class SpecializedAgent:
+class SpecializedAgent(OctopusLeg):
     """Agent client for specialized scanners."""
     
     def __init__(self, agent_type: str, control_plane_url: str = "http://backend:8000"):
-        self.agent_type = agent_type  # 'network', 'malware', or 'security_audit'
-        self.control_plane_url = control_plane_url
-        self.agent_id: Optional[str] = None
-        self.hostname = socket.gethostname()
-        self.ip_address = self._get_ip_address()
+        super().__init__(agent_type, control_plane_url)
         self.capabilities = self._get_capabilities()
-        self.status = "idle"
-        self.current_task = None
-        self.heartbeat_interval = 30
         self.scanner = None
+        self.heartbeat_interval = 30  # seconds
         
-    def _get_ip_address(self) -> str:
-        """Get the agent's IP address."""
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
-            s.close()
-            return ip
-        except Exception:
-            return "127.0.0.1"
-    
     def _get_capabilities(self) -> List[str]:
         """Get capabilities based on agent type."""
         capabilities_map = {
@@ -47,38 +26,6 @@ class SpecializedAgent:
             'security_audit': ['lynis', 'chkrootkit', 'rkhunter']
         }
         return capabilities_map.get(self.agent_type, [])
-    
-    async def register(self) -> bool:
-        """Register this agent with the control plane."""
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    f"{self.control_plane_url}/api/agents/register",
-                    json={
-                        "hostname": f"{self.hostname}-{self.agent_type}",
-                        "ip_address": self.ip_address,
-                        "capabilities": self.capabilities,
-                        "metadata": {
-                            "agent_type": self.agent_type,
-                            "os": os.name
-                        }
-                    }
-                )
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    self.agent_id = data["agent_id"]
-                    print(f"✅ {self.agent_type.upper()} Agent registered: {self.agent_id}")
-                    print(f"   Hostname: {self.hostname}-{self.agent_type}")
-                    print(f"   IP: {self.ip_address}")
-                    print(f"   Capabilities: {', '.join(self.capabilities)}")
-                    return True
-                else:
-                    print(f"❌ Registration failed: {response.status_code}")
-                    return False
-        except Exception as e:
-            print(f"❌ Registration error: {e}")
-            return False
             
     def _get_scan_progress(self) -> Optional[Dict[str, Any]]:
         """Get current scan progress if available."""
@@ -91,89 +38,20 @@ class SpecializedAgent:
                 'errors_count': len(self.scanner.errors)
             }
         return None
-    
-    async def send_heartbeat(self) -> Optional[Dict[str, Any]]:
-        """Send heartbeat to control plane and check for assignments."""
-        if not self.agent_id:
-            return None
         
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    f"{self.control_plane_url}/api/agents/heartbeat",
-                    json={
-                        "agent_id": self.agent_id,
-                        "status": self.status,
-                        "current_task": self.current_task,
-                        "metrics": {
-                            "timestamp": datetime.utcnow().isoformat(),
-                            "agent_type": self.agent_type,
-                            "scan_progress": self._get_scan_progress()
-                        }
-                    }
-                )
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    assignment = data.get("assignment")
-                    
-                    if assignment:
-                        print(f"📋 New assignment received: {assignment['assignment_id']}")
-                        return assignment
-                    
-                    return None
-                elif response.status_code == 404:
-                    print("⚠️  Agent not found (backend restarted?), re-registering...")
-                    await self.register()
-                    return None
-                else:
-                    print(f"⚠️  Heartbeat failed: {response.status_code}")
-                    return None
-                    
-        except Exception as e:
-            print(f"⚠️  Heartbeat error: {e}")
-            return None
+    def _get_metrics(self) -> Dict[str, Any]:
+        """Provide custom metrics for heartbeat."""
+        return {
+            "scan_progress": self._get_scan_progress()
+        }
 
     async def send_status_update(self):
-        """Send a status-only heartbeat update."""
-        if not self.agent_id:
-            return
-        
-        try:
-            # Get scanner progress if available
-            scan_progress = None
-            if self.scanner and hasattr(self.scanner, 'progress'):
-                scan_progress = {
-                    'progress': self.scanner.progress,
-                    'current_scanner': self.scanner.current_scanner,
-                    'scan_details': self.scanner.scan_details,
-                    'results_count': len(self.scanner.results),
-                    'errors_count': len(self.scanner.errors)
-                }
-            
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                await client.post(
-                    f"{self.control_plane_url}/api/agents/heartbeat",
-                    json={
-                        "agent_id": self.agent_id,
-                        "status": self.status,
-                        "current_task": self.current_task,
-                        "metrics": {
-                            "timestamp": datetime.utcnow().isoformat(),
-                            "agent_type": self.agent_type,
-                            "scan_progress": scan_progress
-                        },
-                        "status_update_only": True
-                    }
-                )
-        except Exception as e:
-            print(f"⚠️  Status update error: {e}")
+        """Send a quick status update (wrapper around base heartbeat)."""
+        await self.send_heartbeat(self._get_metrics())
 
     async def process_assignment(self, assignment: Dict[str, Any]):
         """Process a scan assignment."""
-        print(f"\n🎯 Processing assignment: {assignment['assignment_id']}")
-        print(f"   Targets: {assignment.get('targets', [])}")
-        print(f"   Scanners: {assignment.get('scanners', [])}")
+        await self.log("INFO", f"Processing assignment: {assignment['assignment_id']}")
         
         self.status = "scanning"
         self.current_task = assignment['assignment_id']
@@ -190,7 +68,6 @@ class SpecializedAgent:
             # Create scanner-specific config based on selected scanners
             scan_config = {}
             for scanner_name in selected_scanners:
-                print(f"   Processing scanner: '{scanner_name}'")
                 if scanner_name in ['nmap', 'masscan']:
                     scan_config[scanner_name] = {
                         'targets': targets,
@@ -240,11 +117,9 @@ class SpecializedAgent:
                 elif scanner_name == 'lynis':
                     scan_config['lynis'] = {}
                 else:
-                    print(f"   ⚠️  Unknown scanner: '{scanner_name}'")
+                    await self.log("WARN", f"Unknown scanner requested: '{scanner_name}'")
             
-            print(f"   Scan config: {scan_config}")
-            
-            # Import the appropriate scanner
+            # Import the appropriate scanner class dynamically to avoid circular deps or bloat
             if self.agent_type == 'network':
                 from network.network_scanner import NetworkScanner
                 scanner = NetworkScanner(scan_config)
@@ -258,7 +133,7 @@ class SpecializedAgent:
                 from security.security_audit_scanner import SecurityAuditScanner
                 scanner = SecurityAuditScanner(scan_config)
             else:
-                print(f"❌ Unknown agent type: {self.agent_type}")
+                await self.log("ERROR", f"Unknown agent type for scanning: {self.agent_type}")
                 return
             
             # Store scanner reference for progress tracking
@@ -280,68 +155,19 @@ class SpecializedAgent:
                 event_type = f"{result['scanner']}_scan"
                 await self.post_event(result['scanner'], event_type, result)
             
-            print(f"✅ Assignment completed: {assignment['assignment_id']}")
-            print(f"   Results: {len(scanner.results)} findings")
-            print(f"   Errors: {len(scanner.errors)} errors")
+            await self.log("INFO", f"Assignment {assignment['assignment_id']} completed", {
+                "results": len(scanner.results),
+                "errors": len(scanner.errors)
+            })
             
         except Exception as e:
-            print(f"❌ Assignment failed: {e}")
+            await self.log("ERROR", f"Assignment failed: {e}", {"assignment_id": assignment['assignment_id']})
         
         finally:
             self.status = "idle"
             self.current_task = None
             self.scanner = None
             await self.send_status_update()
-    
-    async def post_event(self, source: str, event_type: str, data: Dict[str, Any]):
-        """Post scan results as events to the control plane."""
-        try:
-            event_url = f"{self.control_plane_url}/events"
-            print(f"📤 Posting event to {event_url}: {source}/{event_type}")
-            
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(
-                    event_url,
-                    json={
-                        "source": source,
-                        "type": event_type,
-                        "payload": data
-                    }
-                )
-                
-                if response.status_code == 200:
-                    print(f"✅ Event posted successfully: {source}/{event_type}")
-                else:
-                    print(f"⚠️  Failed to post event: {response.status_code} - {response.text}")
-                    
-        except Exception as e:
-            print(f"⚠️  Error posting event: {e}")
-    
-    async def run_heartbeat_loop(self):
-        """Run continuous heartbeat loop."""
-        print(f"💓 Starting heartbeat loop (every {self.heartbeat_interval}s)")
-        
-        while True:
-            assignment = await self.send_heartbeat()
-            
-            if assignment:
-                await self.process_assignment(assignment)
-            
-            await asyncio.sleep(self.heartbeat_interval)
-    
-    async def deregister(self):
-        """Deregister this agent from the control plane."""
-        if not self.agent_id:
-            return
-        
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                await client.delete(
-                    f"{self.control_plane_url}/api/agents/{self.agent_id}"
-                )
-                print(f"👋 Agent deregistered: {self.agent_id}")
-        except Exception as e:
-            print(f"⚠️  Deregistration error: {e}")
 
 
 async def main():
@@ -350,25 +176,16 @@ async def main():
     agent_type = os.getenv("AGENT_TYPE", sys.argv[1] if len(sys.argv) > 1 else "network")
     control_plane_url = os.getenv("API_URL", "http://backend:8000").replace("/events", "")
     
-    print(f"🐙 AI Defend {agent_type.upper()} Scanner Agent Starting...")
-    print("=" * 50)
+    print(f"🐙 AI Defend {agent_type.upper()} Leg Starting (Octopus v2)...")
     
     # Create specialized agent
     agent = SpecializedAgent(agent_type, control_plane_url)
     
-    # Register with control plane
-    if not await agent.register():
-        print("❌ Failed to register agent, exiting...")
-        return
-    
     try:
         # Start heartbeat loop
-        await agent.run_heartbeat_loop()
+        await agent.run_heartbeat_loop(interval=30)
     except KeyboardInterrupt:
         print("\n⚠️  Shutting down agent...")
-    finally:
-        await agent.deregister()
-
 
 if __name__ == "__main__":
     asyncio.run(main())

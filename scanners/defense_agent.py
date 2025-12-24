@@ -4,465 +4,215 @@ This agent runs with elevated privileges to manage firewall rules and file opera
 """
 
 import asyncio
-import httpx
-import socket
-import json
 import os
-import sys
 import subprocess
 import shutil
-from datetime import datetime
-from typing import Dict, Any, List, Optional
+import json
 from pathlib import Path
+from typing import Dict, Any, Optional
+from octopus_leg import OctopusLeg
 
-
-class DefenseAgent:
+class DefenseAgent(OctopusLeg):
     """Agent capable of executing defensive actions."""
     
     def __init__(self, control_plane_url: str = "http://backend:8000"):
-        self.control_plane_url = control_plane_url
-        self.agent_id = None
-        self.hostname = socket.gethostname()
-        self.ip_address = self._get_ip_address()
-        self.status = "idle"
-        self.current_action = None
+        super().__init__("defense", control_plane_url)
         self.quarantine_path = os.getenv("QUARANTINE_PATH", "/quarantine")
         self.capabilities = [
-            "defense",
-            "block-ip",
-            "unblock-ip", 
-            "quarantine",
-            "restore-file",
-            "firewall-management"
+            "defense", "block-ip", "unblock-ip", 
+            "quarantine", "restore-file", "kill-process",
+            "firewall-management", "tshark-sniff"
         ]
         
         # Ensure quarantine directory exists
         os.makedirs(self.quarantine_path, exist_ok=True)
-        
-    def _get_ip_address(self) -> str:
-        """Get the agent's IP address."""
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
-            s.close()
-            return ip
-        except Exception:
-            return "127.0.0.1"
     
-    async def register(self) -> bool:
-        """Register this agent with the control plane."""
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.control_plane_url}/api/agents/register",
-                    json={
-                        "hostname": self.hostname,
-                        "ip_address": self.ip_address,
-                        "capabilities": self.capabilities,
-                        "metadata": {
-                            "agent_type": "defense",
-                            "quarantine_path": self.quarantine_path
-                        }
-                    },
-                    timeout=10.0
-                )
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    self.agent_id = data.get("agent_id")
-                    print(f"[+] Registered as defense agent: {self.agent_id}")
-                    return True
-                else:
-                    print(f"[-] Registration failed: {response.status_code}")
-                    return False
-                    
-        except Exception as e:
-            print(f"[-] Registration error: {e}")
-            return False
-    
-    async def send_heartbeat(self) -> Optional[Dict]:
-        """Send heartbeat and check for defense assignments."""
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.control_plane_url}/api/agents/heartbeat",
-                    json={
-                        "agent_id": self.agent_id,
-                        "status": self.status,
-                        "current_task": self.current_action,
-                        "metrics": {
-                            "active_blocks": await self._count_active_blocks(),
-                            "quarantined_files": await self._count_quarantined_files()
-                        }
-                    },
-                    timeout=10.0
-                )
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    # Check for defense assignment
-                    if "assignment" in data and data["assignment"]:
-                        return data["assignment"]
-                    return None
-                else:
-                    print(f"[-] Heartbeat failed: {response.status_code}")
-                    return None
-                    
-        except Exception as e:
-            print(f"[-] Heartbeat error: {e}")
-            return None
-    
-    async def _count_active_blocks(self) -> int:
+    async def _get_active_blocks(self) -> int:
         """Count currently blocked IPs via iptables."""
         try:
             result = subprocess.run(
                 ["iptables", "-L", "INPUT", "-n", "--line-numbers"],
-                capture_output=True,
-                text=True,
-                timeout=5
+                capture_output=True, text=True, timeout=5
             )
-            # Count DROP rules (each block is a DROP rule)
             return result.stdout.count("DROP")
         except Exception:
             return 0
-    
+            
     async def _count_quarantined_files(self) -> int:
         """Count files in quarantine."""
         try:
             return len(list(Path(self.quarantine_path).glob("*")))
         except Exception:
             return 0
-    
-    async def block_ip(self, ip: str, reason: str = "") -> Dict[str, Any]:
-        """Block an IP address using iptables."""
-        print(f"[*] Blocking IP: {ip} (Reason: {reason})")
+
+    def _get_metrics(self) -> Dict[str, Any]:
+        """Provide defense-specific metrics."""
+        # Note: We can't easily await here in a sync method, so we might return cached or 0
+        # For simplicity in this refactor, we'll try to keep it synchronous or acceptable
+        # Actually OctopusLeg calls this in an async loop but the method is defined as sync.
+        # We'll upgrade _get_metrics to async in base or just do a quick check here if possible.
+        # Since subprocess is blocking, we should be careful. 
+        # Ideally, we should update the base class to support async metrics, but for now let's just use what we can.
+        # We'll skip the heavy subprocess call here to avoid blocking the loop too much, 
+        # or accepting it since it's an agent.
+        return {} # Metrics will be calculated inside send_heartbeat override if needed
+
+    # Override send_heartbeat to include async metrics
+    async def send_heartbeat(self, metrics: Dict[str, Any] = {}) -> Optional[Dict[str, Any]]:
+        metric_overrides = {
+            "active_blocks": await self._get_active_blocks(),
+            "quarantined_files": await self._count_quarantined_files()
+        }
+        return await super().send_heartbeat({**metrics, **metric_overrides})
+
+    async def execute_action(self, action: str, target: str, reason: str = "") -> Dict[str, Any]:
+        """Execute a defensive command."""
+        await self.log("INFO", f"Executing {action} on {target}", {"reason": reason})
         
         try:
-            # Check if already blocked
-            check_result = subprocess.run(
-                ["iptables", "-C", "INPUT", "-s", ip, "-j", "DROP"],
-                capture_output=True,
-                timeout=5
-            )
-            
-            if check_result.returncode == 0:
-                return {
-                    "success": True,
-                    "message": f"IP {ip} was already blocked",
-                    "ip": ip,
-                    "action": "block_ip"
-                }
-            
-            # Block the IP
-            result = subprocess.run(
-                ["iptables", "-A", "INPUT", "-s", ip, "-j", "DROP"],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            
-            if result.returncode == 0:
-                print(f"[+] Successfully blocked IP: {ip}")
-                return {
-                    "success": True,
-                    "message": f"Blocked IP {ip}",
-                    "ip": ip,
-                    "action": "block_ip"
-                }
+            if action == "block_ip":
+                return await self._block_ip(target)
+            elif action == "unblock_ip":
+                return await self._unblock_ip(target)
+            elif action == "quarantine_file":
+                return await self._quarantine_file(target, reason)
+            elif action == "restore_file":
+                return await self._restore_file(target)
+            elif action == "kill_process":
+                return await self._kill_process(int(target))
             else:
-                print(f"[-] Failed to block IP: {result.stderr}")
-                return {
-                    "success": False,
-                    "message": f"Failed to block IP: {result.stderr}",
-                    "ip": ip,
-                    "action": "block_ip"
-                }
-                
-        except subprocess.TimeoutExpired:
-            return {"success": False, "message": "iptables command timed out", "ip": ip}
+                return {"success": False, "message": f"Unknown action: {action}"}
         except Exception as e:
-            return {"success": False, "message": str(e), "ip": ip}
+            await self.log("ERROR", f"Action failed: {e}")
+            return {"success": False, "message": str(e)}
+
+    # --- Action Implementations ---
     
-    async def unblock_ip(self, ip: str) -> Dict[str, Any]:
-        """Unblock a previously blocked IP address."""
-        print(f"[*] Unblocking IP: {ip}")
+    async def _block_ip(self, ip: str) -> Dict[str, Any]:
+        # Check if already blocked
+        check = subprocess.run(["iptables", "-C", "INPUT", "-s", ip, "-j", "DROP"], capture_output=True)
+        if check.returncode == 0:
+            return {"success": True, "message": f"IP {ip} already blocked"}
+            
+        res = subprocess.run(["iptables", "-A", "INPUT", "-s", ip, "-j", "DROP"], capture_output=True, text=True)
+        if res.returncode == 0:
+            return {"success": True, "message": f"Blocked IP {ip}"}
+        else:
+            raise Exception(f"iptables error: {res.stderr}")
+
+    async def _unblock_ip(self, ip: str) -> Dict[str, Any]:
+        res = subprocess.run(["iptables", "-D", "INPUT", "-s", ip, "-j", "DROP"], capture_output=True, text=True)
+        if res.returncode == 0 or "No chain/target/match" in res.stderr:
+            return {"success": True, "message": f"Unblocked IP {ip}"}
+        else:
+            raise Exception(f"iptables error: {res.stderr}")
+
+    async def _quarantine_file(self, path: str, reason: str) -> Dict[str, Any]:
+        src = Path(path)
+        if not src.exists():
+            return {"success": False, "message": "File not found"}
+            
+        timestamp = asyncio.get_event_loop().time() # simple timestamp
+        dest = Path(self.quarantine_path) / f"{int(timestamp)}_{src.name}"
         
-        try:
-            result = subprocess.run(
-                ["iptables", "-D", "INPUT", "-s", ip, "-j", "DROP"],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            
-            if result.returncode == 0:
-                print(f"[+] Successfully unblocked IP: {ip}")
-                return {
-                    "success": True,
-                    "message": f"Unblocked IP {ip}",
-                    "ip": ip,
-                    "action": "unblock_ip"
-                }
-            else:
-                # Check if it wasn't blocked
-                if "No chain/target/match by that name" in result.stderr or "Bad rule" in result.stderr:
-                    return {
-                        "success": True,
-                        "message": f"IP {ip} was not blocked",
-                        "ip": ip,
-                        "action": "unblock_ip"
-                    }
-                return {
-                    "success": False,
-                    "message": f"Failed to unblock IP: {result.stderr}",
-                    "ip": ip,
-                    "action": "unblock_ip"
-                }
-                
-        except Exception as e:
-            return {"success": False, "message": str(e), "ip": ip}
-    
-    async def quarantine_file(self, file_path: str, reason: str = "") -> Dict[str, Any]:
-        """Move a file to quarantine directory."""
-        print(f"[*] Quarantining file: {file_path} (Reason: {reason})")
+        # Metadata
+        meta = {"original_path": str(src.absolute()), "reason": reason}
+        shutil.move(str(src), str(dest))
         
+        with open(str(dest) + ".meta", "w") as f:
+            json.dump(meta, f)
+            
+        return {"success": True, "message": f"Quarantined to {dest.name}"}
+
+    async def _restore_file(self, name: str) -> Dict[str, Any]:
+        src = Path(self.quarantine_path) / name
+        meta_file = Path(str(src) + ".meta")
+        
+        if not src.exists() or not meta_file.exists():
+            return {"success": False, "message": "File or metadata missing"}
+            
+        with open(meta_file, "r") as f:
+            meta = json.load(f)
+            
+        shutil.move(str(src), meta["original_path"])
+        meta_file.unlink()
+        return {"success": True, "message": f"Restored to {meta['original_path']}"}
+
+    async def _kill_process(self, pid: int) -> Dict[str, Any]:
         try:
-            source = Path(file_path)
-            
-            if not source.exists():
-                return {
-                    "success": False,
-                    "message": f"File not found: {file_path}",
-                    "file_path": file_path,
-                    "action": "quarantine_file"
-                }
-            
-            # Create unique quarantine filename
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            quarantine_name = f"{timestamp}_{source.name}"
-            quarantine_dest = Path(self.quarantine_path) / quarantine_name
-            
-            # Save metadata about original location
-            metadata = {
-                "original_path": str(source.absolute()),
-                "quarantined_at": datetime.now().isoformat(),
-                "reason": reason,
-                "original_permissions": oct(source.stat().st_mode)[-3:]
-            }
-            
-            # Move the file
-            shutil.move(str(source), str(quarantine_dest))
-            
-            # Write metadata
-            metadata_file = quarantine_dest.with_suffix(quarantine_dest.suffix + ".meta")
-            with open(metadata_file, "w") as f:
-                json.dump(metadata, f, indent=2)
-            
-            print(f"[+] Successfully quarantined: {file_path} -> {quarantine_dest}")
-            return {
-                "success": True,
-                "message": f"Quarantined {source.name}",
-                "file_path": file_path,
-                "quarantine_path": str(quarantine_dest),
-                "action": "quarantine_file"
-            }
-            
+            os.kill(pid, 9)
+            return {"success": True, "message": f"Killed PID {pid}"}
+        except ProcessLookupError:
+            return {"success": True, "message": "Process already gone"}
         except PermissionError:
-            return {
-                "success": False,
-                "message": f"Permission denied: {file_path}",
-                "file_path": file_path,
-                "action": "quarantine_file"
-            }
-        except Exception as e:
-            return {"success": False, "message": str(e), "file_path": file_path}
-    
-    async def restore_file(self, quarantine_name: str) -> Dict[str, Any]:
-        """Restore a quarantined file to its original location."""
-        print(f"[*] Restoring file: {quarantine_name}")
-        
-        try:
-            quarantine_file = Path(self.quarantine_path) / quarantine_name
-            metadata_file = quarantine_file.with_suffix(quarantine_file.suffix + ".meta")
-            
-            if not quarantine_file.exists():
-                return {
-                    "success": False,
-                    "message": f"Quarantined file not found: {quarantine_name}",
-                    "action": "restore_file"
-                }
-            
-            # Read metadata
-            original_path = None
-            if metadata_file.exists():
-                with open(metadata_file, "r") as f:
-                    metadata = json.load(f)
-                    original_path = metadata.get("original_path")
-            
-            if not original_path:
-                return {
-                    "success": False,
-                    "message": "Cannot restore: original path unknown",
-                    "action": "restore_file"
-                }
-            
-            # Restore the file
-            shutil.move(str(quarantine_file), original_path)
-            
-            # Remove metadata file
-            if metadata_file.exists():
-                metadata_file.unlink()
-            
-            print(f"[+] Successfully restored: {quarantine_name} -> {original_path}")
-            return {
-                "success": True,
-                "message": f"Restored to {original_path}",
-                "original_path": original_path,
-                "action": "restore_file"
-            }
-            
-        except Exception as e:
-            return {"success": False, "message": str(e), "action": "restore_file"}
-    
-    async def kill_process(self, pid: int, reason: str = "") -> Dict[str, Any]:
-        """Kill a process by PID."""
-        print(f"[*] Killing process: {pid} (Reason: {reason})")
-        
-        try:
-            # First check if process exists
-            result = subprocess.run(
-                ["kill", "-0", str(pid)],
-                capture_output=True,
-                timeout=5
-            )
-            
-            if result.returncode != 0:
-                return {
-                    "success": True,
-                    "message": f"Process {pid} does not exist",
-                    "pid": pid,
-                    "action": "kill_process"
-                }
-            
-            # Kill the process
-            result = subprocess.run(
-                ["kill", "-9", str(pid)],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            
-            if result.returncode == 0:
-                print(f"[+] Successfully killed process: {pid}")
-                return {
-                    "success": True,
-                    "message": f"Killed process {pid}",
-                    "pid": pid,
-                    "action": "kill_process"
-                }
-            else:
-                return {
-                    "success": False,
-                    "message": f"Failed to kill process: {result.stderr}",
-                    "pid": pid,
-                    "action": "kill_process"
-                }
-                
-        except Exception as e:
-            return {"success": False, "message": str(e), "pid": pid}
-    
-    async def process_assignment(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
-        """Process a defense action assignment."""
+            raise Exception("Permission denied")
+
+    async def process_assignment(self, assignment: Dict[str, Any]):
+        """Process defense assignment."""
+        action_id = assignment.get("defense_action_id")
         action_type = assignment.get("action_type")
         target = assignment.get("target")
         reason = assignment.get("reason", "")
-        defense_action_id = assignment.get("defense_action_id")
         
-        print(f"[*] Processing defense action: {action_type} -> {target}")
         self.status = "executing"
-        self.current_action = f"{action_type}: {target}"
+        self.current_task = f"{action_type}:{target}"
+        await self.send_heartbeat() # Update status immediately
         
-        result = None
+        result = await self.execute_action(action_type, target, reason)
         
-        if action_type == "block_ip":
-            result = await self.block_ip(target, reason)
-        elif action_type == "unblock_ip":
-            result = await self.unblock_ip(target)
-        elif action_type == "quarantine_file":
-            result = await self.quarantine_file(target, reason)
-        elif action_type == "restore_file":
-            result = await self.restore_file(target)
-        elif action_type == "kill_process":
-            result = await self.kill_process(int(target), reason)
-        else:
-            result = {"success": False, "message": f"Unknown action type: {action_type}"}
-        
-        # Report result back to control plane
-        await self.report_action_result(defense_action_id, result)
+        # Report result
+        status = "active" if result.get("success") else "failed"
+        await self.post_event("defense-agent", "defense_action_result", {
+            "action_id": action_id,
+            "result": result,
+            "status": status
+        })
         
         self.status = "idle"
-        self.current_action = None
+        self.current_task = None
         
-        return result
-    
-    async def report_action_result(self, action_id: int, result: Dict[str, Any]):
-        """Report defense action result to control plane."""
-        try:
-            async with httpx.AsyncClient() as client:
-                # Update defense action status
-                status = "active" if result.get("success") else "failed"
-                await client.post(
-                    f"{self.control_plane_url}/events",
-                    json={
-                        "source": "defense-agent",
-                        "type": "defense_action_result",
-                        "payload": {
-                            "action_id": action_id,
-                            "result": result,
-                            "status": status
-                        }
-                    },
-                    timeout=10.0
-                )
-        except Exception as e:
-            print(f"[-] Error reporting action result: {e}")
-    
-    async def run(self):
-        """Main agent loop."""
-        print("[*] Starting Defense Agent...")
-        
-        # Register with control plane
-        while not await self.register():
-            print("[*] Retrying registration in 5 seconds...")
-            await asyncio.sleep(5)
-        
-        print("[+] Defense Agent active and ready")
-        
-        # Main heartbeat loop
+    async def run_periodic_tshark_scan(self):
+        """Periodic background sniffing."""
+        await self.log("INFO", "Starting periodic tshark scan (every 5m)")
         while True:
             try:
-                assignment = await self.send_heartbeat()
+                interface = os.getenv("SNIFF_INTERFACE", "eth0")
+                duration = 30
+                cmd = ["tshark", "-i", interface, "-a", f"duration:{duration}", "-T", "json", "-l"]
                 
-                if assignment:
-                    await self.process_assignment(assignment)
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd, 
+                    stdout=asyncio.subprocess.PIPE, 
+                    stderr=asyncio.subprocess.PIPE
+                )
+                stdout, stderr = await proc.communicate()
                 
-                await asyncio.sleep(5)  # 5-second heartbeat interval
-                
-            except asyncio.CancelledError:
-                print("[*] Defense Agent shutting down...")
-                break
+                if proc.returncode == 0:
+                    packets = json.loads(stdout.decode('utf-8', errors='ignore'))
+                    # Simple volume check
+                    if len(packets) > 1000: # Threshold
+                        await self.post_event("defense-leg", "suspicious_traffic", {
+                            "summary": f"High traffic volume ({len(packets)} packets)",
+                            "interface": interface
+                        })
+                else:
+                    await self.log("WARN", "Tshark failed", {"stderr": stderr.decode()})
+                    
             except Exception as e:
-                print(f"[-] Error in main loop: {e}")
-                await asyncio.sleep(5)
-
+                await self.log("ERROR", f"Periodic scan error: {e}")
+                
+            await asyncio.sleep(300)
 
 async def main():
-    """Entry point for defense agent."""
-    control_plane_url = os.getenv("API_URL", "http://backend:8000")
-    agent = DefenseAgent(control_plane_url=control_plane_url)
-    await agent.run()
-
+    control_plane_url = os.getenv("API_URL", "http://backend:8000").replace("/events", "")
+    print("🐙 AI Defend DEFENSE Leg Starting (Octopus v2)...")
+    
+    agent = DefenseAgent(control_plane_url)
+    
+    await asyncio.gather(
+        agent.run_heartbeat_loop(interval=5),
+        agent.run_periodic_tshark_scan()
+    )
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS detection_feedback (
   id SERIAL PRIMARY KEY,
   detection_id INT REFERENCES detections(id) ON DELETE CASCADE,
   feedback TEXT NOT NULL,
-  created_at TIMESTAMP DEFAULT now()
+  created_at TIMESTAMP DEFAULT now(),
+  UNIQUE(detection_id)
 );
 
 -- Create indexes for better query performance
@@ -69,3 +70,16 @@ ON CONFLICT (key) DO NOTHING;
 CREATE INDEX IF NOT EXISTS idx_defense_actions_status ON defense_actions(status);
 CREATE INDEX IF NOT EXISTS idx_defense_actions_action_type ON defense_actions(action_type);
 CREATE INDEX IF NOT EXISTS idx_defense_actions_created_at ON defense_actions(created_at);
+
+-- Centralized logging for agents
+CREATE TABLE IF NOT EXISTS agent_logs (
+    id SERIAL PRIMARY KEY,
+    agent_id VARCHAR(100) NOT NULL,
+    log_level VARCHAR(20) NOT NULL,
+    message TEXT NOT NULL,
+    context JSONB DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Index for querying logs by agent and time
+CREATE INDEX IF NOT EXISTS idx_agent_logs_agent_time ON agent_logs(agent_id, created_at DESC);

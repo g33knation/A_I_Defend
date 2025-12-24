@@ -6,8 +6,13 @@ services:
       - "5672:5672"
       - "15672:15672"
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-guest}
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
 
   db:
     image: postgres:15
@@ -21,6 +26,11 @@ services:
       - ./scans:/scans
     ports:
       - "5434:5432"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 1G
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U postgres -d defense" ]
       interval: 5s
@@ -36,13 +46,19 @@ services:
       rabbitmq:
         condition: service_started
     environment:
-      DATABASE_URL: ${DATABASE_URL}
-      RABBITMQ_URL: ${RABBITMQ_URL}
+      DATABASE_URL: ${DATABASE_URL:-postgres://postgres:changeit@db:5432/defense}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672//}
+      BRAIN_API_KEY: ${BRAIN_API_KEY:-octopus-nervous-system-secret}
     volumes:
       - ./scanners:/app/scanners
       # - /var/run/docker.sock:/var/run/docker.sock # REMOVED: Insecure
     ports:
       - "8000:8000"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
     working_dir: /app
 
   frontend:
@@ -53,94 +69,122 @@ services:
     ports:
       - "8002:80"
 
-  # Network Monitor Agent (Active Scanning)
-  network-monitor:
+  # Network Leg (Active Scanning)
+  net-leg:
     build: ./scanners
-    container_name: network-monitor
-    hostname: network-monitor
+    container_name: net-leg
+    hostname: net-leg
     depends_on:
       - backend
     environment:
       - API_URL=http://backend:8000
       - AGENT_TYPE=network
+      - BRAIN_API_KEY=${BRAIN_API_KEY:-octopus-nervous-system-secret}
     command: [ "python", "-u", "/app/specialized_agent.py", "network" ]
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
     cap_add:
       - NET_ADMIN
       - NET_RAW
     restart: unless-stopped
 
-  # Network Intelligence Agent (Passive + Active Scanning)
+  # Intelligence Leg (Passive + Active Scanning)
   # No credentials needed - uses network protocols only
-  network-intel:
+  intel-leg:
     build: ./scanners
-    container_name: network-intel
-    hostname: network-intel
+    container_name: intel-leg
+    hostname: intel-leg
     depends_on:
       - backend
     environment:
       - API_URL=http://backend:8000
       - AGENT_TYPE=network_intel
+      - BRAIN_API_KEY=${BRAIN_API_KEY:-octopus-nervous-system-secret}
     command: [ "python", "-u", "/app/specialized_agent.py", "network_intel" ]
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
     cap_add:
       - NET_ADMIN
       - NET_RAW
     restart: unless-stopped
 
-  # Malware Scanner Agent
-  malware-scanner:
+  # Malware Leg
+  malware-leg:
     build: ./scanners
-    container_name: malware-scanner
-    hostname: malware-scanner
+    container_name: malware-leg
+    hostname: malware-leg
     depends_on:
       - backend
     environment:
       - API_URL=http://backend:8000
       - AGENT_TYPE=malware
+      - BRAIN_API_KEY=${BRAIN_API_KEY:-octopus-nervous-system-secret}
     command: [ "python", "-u", "/app/specialized_agent.py", "malware" ]
     volumes:
-      # - /:/host_wsl:ro            # REMOVED: Too broad
-      # - C:/:/host_windows:ro      # REMOVED: Too broad
-      - ./scans:/host_wsl:ro # Restricted to scans directory for now
+      - ./scans:/host_scans:ro # Restricted to scans directory
       - /var/run/docker.sock:/var/run/docker.sock # Kept for malware scanner but flagged
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
     restart: unless-stopped
 
-  # Security Audit Scanner Agent
-  security-scanner:
+  # Audit Leg
+  audit-leg:
     build: ./scanners
-    container_name: security-scanner
-    hostname: security-scanner
+    container_name: audit-leg
+    hostname: audit-leg
     depends_on:
       - backend
     environment:
       - API_URL=http://backend:8000
       - AGENT_TYPE=security_audit
+      - BRAIN_API_KEY=${BRAIN_API_KEY:-octopus-nervous-system-secret}
     command: [ "python", "-u", "/app/specialized_agent.py", "security_audit" ]
     volumes:
       - /etc:/etc:ro
       - /var/log:/var/log:ro
-      - /:/host_wsl:ro # Mount WSL root to /host_wsl
+      - ./scanners:/host_audit:ro # Restricted isolation
       - C:/:/host_windows:ro # Mount Windows C drive to /host_windows
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
     restart: unless-stopped
 
-  # Defense Agent (Autonomous Defense Actions)
-  defense-agent:
+  # Defense Leg (Autonomous Defense Actions)
+  defense-leg:
     build: ./scanners
-    container_name: defense-agent
-    hostname: defense-agent
+    container_name: defense-leg
+    hostname: defense-leg
     depends_on:
       - backend
     environment:
-      - API_URL=http://localhost:8000
+      - API_URL=http://backend:8000
       - QUARANTINE_PATH=/quarantine
+      - BRAIN_API_KEY=${BRAIN_API_KEY:-octopus-nervous-system-secret}
     command: [ "python", "-u", "/app/defense_agent.py" ]
     cap_add:
-      - NET_ADMIN # For iptables firewall management
-      - SYS_PTRACE # For process management
-    network_mode: "host" # Required for firewall rules to affect host
+      - NET_ADMIN # For iptables (container-only on Windows)
+      - SYS_PTRACE
+    # network_mode: "host" - Removed for Windows compatibility
     volumes:
       - quarantine_data:/quarantine
       - /var/run/docker.sock:/var/run/docker.sock
-    privileged: true # Required for iptables
+    privileged: true
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
     restart: unless-stopped
 
   # Legacy all-in-one scanner (optional, can be removed)
@@ -201,6 +245,10 @@ services:
     container_name: model-server
     ports:
       - "11434:11434"
+    deploy:
+      resources:
+        limits:
+          memory: 8G # Large memory for AI models
     volumes:
       - ollama_data:/root/.ollama
     depends_on:
