@@ -411,6 +411,35 @@ async def purge_events():
         await conn.execute("DELETE FROM events")
     return {"status": "ok", "message": "All events and detections purged"}
 
+def summarize_security_data(data: str, max_chars: int = 5000) -> str:
+    """
+    Intelligently summarizes large security payloads to prevent LLM context overflow.
+    """
+    if not data or len(data) <= max_chars:
+        return data
+
+    summary = f"[PAYLOAD TRUNCATED - ORIGINAL SIZE: {len(data)} chars]\n"
+    
+    # Check if it's an Nmap scan
+    if "Nmap scan report" in data:
+        lines = data.splitlines()
+        summary += "\n".join(lines[:20]) # First 20 lines usually contain target and open ports
+        summary += f"\n... [{len(lines)-40} lines truncated] ...\n"
+        summary += "\n".join(lines[-20:]) # Last 20 lines often contain OS detection and summary
+        return summary
+        
+    # Check if it's Tshark output
+    if "Capturing on" in data or "Packets" in data:
+        lines = data.splitlines()
+        summary += "\n".join(lines[:30]) # Capture stats
+        summary += f"\n... [{len(lines)-60} lines truncated] ...\n"
+        summary += "\n".join(lines[-30:]) # End summary
+        return summary
+
+    # Generic truncation: take start and end
+    half_max = max_chars // 2
+    return data[:half_max] + f"\n... [{len(data)-max_chars} chars truncated] ...\n" + data[-half_max:]
+
 @app.post("/ask")
 async def ask_model(req: AskIn):
     """Send a query to Ollama and return the response."""
@@ -482,7 +511,7 @@ async def ask_model(req: AskIn):
         try:
             if agents.agents:
                 active_agents = [
-                    f"- {a['hostname']} ({a['ip_address']}): {a['status']} (Capabilities: {', '.join(a['capabilities'])})"
+                    f"- {a['hostname']} ({a['ip_address']}): {a['status']} ({a['health']}, Latency: {a.get('latency', 0)}s)"
                     for a in agents.agents.values()
                 ]
                 context_text += f"\nActive Agents:\n" + "\n".join(active_agents) + "\n"
@@ -506,9 +535,15 @@ async def ask_model(req: AskIn):
                 for s in recent_scans:
                     status = s.get('status', 'unknown')
                     start = s.get('start_time')
-                    scan_list.append(f"- Scan {status} (Started: {start})")
+                    
+                    # SUMMARIZE LARGE RESULTS
+                    results = s.get('results', {})
+                    results_str = str(results)
+                    summarized_results = summarize_security_data(results_str)
+                    
+                    scan_list.append(f"- Scan {status} (Started: {start})\n  Results Context: {summarized_results[:1000]}") # Still limit per item
                 
-                context_text += f"\nRecent Scans:\n" + "\n".join(scan_list) + "\n"
+                context_text += f"\nRecent Scans (Summarized):\n" + "\n".join(scan_list) + "\n"
             else:
                 context_text += "\nRecent Scans: None recorded.\n"
         except Exception as e:
@@ -596,13 +631,13 @@ async def ask_model(req: AskIn):
            - IP endpoints
            - Security analysis (suspicious activity, port scans, etc.)
            - Final conclusion on network status
-        
+         
         7. **For nmap reports**, include:
            - Target summary
            - Open ports table with service info
            - OS detection results if available
            - Security recommendations
-        
+         
         Be thorough, professional, and make reports visually impressive and easy to understand.
         """
 
@@ -624,18 +659,17 @@ Please answer based ONLY on the information above. If I listed specific malware 
         print(f"CONTEXT TEXT BEING SENT:")
         print(context_text)
         print(f"=" * 80)
-        print(f"FULL MESSAGES:")
-        print(json.dumps(messages, indent=2))
-        print(f"=" * 80)
 
-        # Use the global client initialized on startup
-        # We use a 600s timeout to allow for slow generation on CPU or under heavy load (e.g. Stable Diffusion)
         # Call Ollama's Chat API
         ollama_url = f"{MODEL_SERVER_URL}/api/chat"
         payload = {
             "model": req.model,
             "messages": messages,
-            "stream": False
+            "stream": False,
+            "options": {
+                "num_ctx": 16384, # Increase context window for complex logs
+                "temperature": 0.2 # Lower temperature for factual analysis
+            }
         }
         
         response = await app.state.client.post(

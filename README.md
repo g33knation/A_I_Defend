@@ -1,257 +1,64 @@
-# AI Defend - Distributed Security Monitoring Platform
+# AI Defend: Enterprise Security Intelligence
 
-Enterprise-grade security monitoring platform with distributed architecture for scalable network and system defense.
+AI Defend is a distributed, autonomous security monitoring and defense platform designed to protect modern infrastructure through intelligent agent orchestration and high-performance analysis.
 
-## Overview
+## Core Mission
 
-AI Defend implements a distributed security architecture:
-- **Control Plane**: Centralized management, AI/ML processing, and dashboard
-- **Scanner Agents**: Distributed security scanners deployed across network segments
-- **One-Way Data Flow**: Agents send data to control plane, preventing lateral compromise
-- **Cloud-Native**: Kubernetes-ready for enterprise deployment
+Our objective is to provide an resilient, scalable security layer that operates independently of the systems it protects. AI Defend leverages a decentralized architecture to ensure that security monitoring remains functional and isolated, even when individual infrastructure segments are compromised.
 
-### Architecture Philosophy
+## System Architecture
 
-Built on principles of **isolation and containment**:
-1. Scanner agents operate independently in isolated environments
-2. Control plane processes security data without direct agent control
-3. Component compromise doesn't cascade to others
-4. Horizontal scaling supports enterprise-wide deployment
+The platform is built on a "Intelligence-at-the-Edge" philosophy:
 
----
+*   **Secure Control Plane**: A centralized FastAPI hub for data aggregation, AI-driven threat correlation, and administrative orchestration.
+*   **Distributed Scanner Agents**: Specialized agents performing network analysis, malware detection, and security auditing across diverse environments.
+*   **One-Way Intelligence Flow**: Data is pushed from agents to the control plane, ensuring that agents have zero knowledge of the broader management infrastructure.
+*   **AI Integration**: A dedicated model server providing real-time natural language query capabilities and automated threat classification.
 
-## Features
+## The Rust/Wasm Roadmap
 
-### Security Monitoring
-- **Network Scanning**: Host discovery, service enumeration, port analysis
-- **Security Auditing**: System hardening and compliance validation
-- **Malware Detection**: File scanning and pattern matching
-- **Event Correlation**: AI-powered threat analysis
-- **Real-time Alerts**: Immediate security event notification
+We are currently undergoing a strategic migration of our agent infrastructure from Python to **Rust and WebAssembly (Wasm)**.
 
-### Agent Management
-- **Auto-Registration**: Agents connect automatically to control plane
-- **Health Monitoring**: Heartbeat-based status tracking
-- **Task Distribution**: Intelligent scan assignment across agents
-- **Load Balancing**: Workload optimization
-- **Scalability**: Deploy agents across infrastructure segments
+### Why Rust & Wasm?
 
-### Dashboard & Reporting
-- **Live Monitoring**: Real-time security status
-- **Event Timeline**: Historical security event tracking
-- **Detection Management**: Threat review and classification
-- **Agent Monitoring**: Registered scanner agent visibility
-- **AI Assistant**: Natural language security queries
+*   **Memory Safety**: Rust's ownership model eliminates common memory-related vulnerabilities, providing a more robust foundation for security tools.
+*   **Performance**: Near-native execution speeds for compute-intensive tasks like packet inspection and file scanning.
+*   **Secure Sandboxing**: By compiling agents to Wasm, we can execute security tasks in highly isolated virtual environments with strictly defined capabilities.
+*   **Cross-Platform Portability**: Wasm allows us to deploy identical security logic across Linux, Windows, and Cloud-native environments without platform-specific overhead.
 
----
+## Defensive Implementation
+
+AI Defend maintains a strict security posture through its design:
+
+1.  **Isolation & Containment**: Every agent operates in a restricted environment with minimal privileges.
+2.  **Least-State Architecture**: Agents do not store long-term credentials or sensitive system metadata.
+3.  **Encapsulated Logic**: Modular design allows for rapid deployment of new security capabilities without modifying core platform infrastructure.
 
 ## Getting Started
 
 ### Prerequisites
-- Docker & Docker Compose
-- 4GB+ RAM recommended
-- Modern web browser
 
-### Quick Start
+*   Docker & Docker Compose
+*   Modern Web Browser
+*   64-bit OS (Linux preferred)
+
+### Quick Deployment
 
 ```bash
-# Clone repository
+# Clone the intelligence repository
 git clone https://github.com/g33knation/A_I_Defend.git
 cd A_I_Defend
 
-# Start all services
+# Initialize the ecosystem
 docker-compose up -d --build
-
-# Access dashboard
-# Navigate to http://localhost:8001
 ```
 
-### Initial Configuration
+Access the management dashboard at `http://localhost:8002`.
 
-1. Access the web dashboard
-2. Navigate to "Scanner Agents" to view registered agents
-3. Assign scan tasks to agents via the UI
-4. Monitor results in "Detections" and "Events" views
+## Deployment & Scaling
 
----
-
-## Usage
-
-### Dashboard Navigation
-
-- **Events**: Complete event timeline with filtering
-- **Detections**: Security threat review and classification
-- **Scanner Agents**: Agent health monitoring and task assignment
-- **Ask AI**: Natural language security analysis
-
-### Scanner Capabilities
-
-**Network Intelligence**
-- Port scanning and service discovery
-- Traffic analysis and protocol detection
-- Network mapping and topology discovery
-- DNS enumeration
-
-**Security Auditing**
-- System configuration analysis
-- Compliance validation
-- Rootkit detection
-- Security baseline verification
-
-**Malware Detection**
-- File signature scanning
-- Pattern matching
-- Behavioral analysis
+The architecture is designed for orchestration via **Kubernetes**, supporting horizontal scaling of scanner agents to meet the demands of enterprise-scale networks. Deployment manifests are located in the `k8s/` directory.
 
 ---
 
-## Security Model
-
-### Design Principles
-
-1. **Isolation**: Agents operate in isolated environments
-2. **Least Privilege**: Minimal permissions per component
-3. **Unidirectional Flow**: Data flows from agents to control plane only
-4. **Containment**: Component compromise isolation
-
-### Agent Security
-
-- Capability-based security model
-- Read-only filesystem access where applicable
-- No credential storage in agents
-- Pull-based task assignment model
-
-### Deployment Security
-
-- Change default credentials immediately
-- Use TLS for production deployments
-- Implement network segmentation
-- Regular security updates
-- Monitor agent activity logs
-- Restrict API access
-
----
-
-## Deployment
-
-### Docker Compose
-
-```bash
-# Start services
-docker-compose up -d --build
-
-# View logs
-docker-compose logs -f
-
-# Stop services
-docker-compose down
-```
-
-### Kubernetes
-
-```bash
-# Deploy agents
-kubectl apply -f k8s/scanner-deployment.yaml
-
-# Scale deployment
-kubectl scale deployment scanner-agent -n ai-defend --replicas=10
-```
-
-### Production Considerations
-
-- Configure persistent storage for PostgreSQL
-- Implement backup strategies
-- Use secrets management for credentials
-- Enable TLS/SSL for all communications
-- Configure resource limits
-- Implement monitoring and alerting
-- Regular security audits
-
----
-
-## Monitoring
-
-### Health Checks
-
-- Agents send heartbeats every 30 seconds
-- Control plane tracks agent status
-- Stale detection after 5 minutes of inactivity
-
-### Metrics
-
-**Control Plane**
-- Registered agent count
-- Active scan count
-- Event processing rate
-- Detection creation rate
-
-**Agents**
-- Current status
-- Scan completion rate
-- Error rate
-
----
-
-## Development
-
-### Project Structure
-
-```
-A_I_Defend/
-├── backend/              # FastAPI control plane
-├── frontend/             # Vue.js dashboard
-├── scanners/             # Scanner agent implementations
-├── k8s/                  # Kubernetes manifests
-└── docker-compose.yml    # Development orchestration
-```
-
-### Extending Functionality
-
-1. Implement scanner in `scanners/` directory
-2. Register capability in agent client
-3. Update frontend for new scanner type
-4. Test thoroughly before deployment
-
----
-
-## Legal & Compliance
-
-### Authorization Requirements
-
-**You must have explicit authorization before scanning any network or system.**
-
-- Obtain written permission for all scan targets
-- Comply with organizational security policies
-- Follow applicable laws and regulations
-- Document all scanning activities
-- Maintain audit logs
-
-### Responsible Use
-
-- Only scan authorized networks and systems
-- Respect privacy and data protection laws
-- Use appropriate scan intensity
-- Schedule scans during approved windows
-- Report vulnerabilities responsibly
-
-### Disclaimer
-
-This platform is for authorized security monitoring only. Users are solely responsible for:
-- Obtaining proper authorization
-- Legal compliance
-- Ethical use
-- Deployment security
-
-Developers assume no liability for misuse.
-
----
-
-## Support
-
-- **Issues**: Report bugs via GitHub Issues
-- **Documentation**: See project wiki
-- **Security**: Report vulnerabilities privately
-
----
-
-**AI Defend Team**
+*AI Defend: Proactive, Isolated, and Intelligent Defense.*

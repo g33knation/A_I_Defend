@@ -66,11 +66,14 @@ export interface Agent {
   ip_address: string;
   capabilities: string[];
   status: string;
+  health: 'online' | 'stale' | 'offline';
+  latency: number;
   last_heartbeat: string;
   last_scan_time?: string;
   registered_at: string;
   current_assignment?: string;
   metrics?: any;
+  metadata?: any;
 }
 
 interface DefenseState {

@@ -124,8 +124,8 @@ export default function Agents() {
 
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">Scanner Agents</h1>
-          <p className="text-slate-400 mt-1">Manage and monitor active security agents</p>
+          <h1 className="text-3xl font-bold text-white tracking-tight">Nervous System Health</h1>
+          <p className="text-slate-400 mt-1">Live status and performance of all active security legs</p>
         </div>
         <div className="flex gap-3">
           <button
@@ -152,14 +152,25 @@ export default function Agents() {
                   {agent.hostname.substring(0, 2).toUpperCase()}
                 </div>
               </div>
-              <span className={`px-2 py-1 rounded text-xs font-mono border ${agent.status === 'scanning'
-                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                : agent.status === 'error'
-                  ? 'bg-red-500/10 text-red-400 border-red-500/20'
+              <div className="flex flex-col items-end gap-2">
+                <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider border ${agent.health === 'online'
+                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                  : agent.health === 'stale'
+                    ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                    : 'bg-red-500/10 text-red-400 border-red-500/20'
+                  }`}>
+                  {agent.health}
+                </span>
+                <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider border ${agent.status === 'scanning'
+                  ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20'
                   : 'bg-slate-500/10 text-slate-400 border-slate-500/20'
-                }`}>
-                {agent.status}
-              </span>
+                  }`}>
+                  {agent.status}
+                </span>
+                <span className="text-[10px] font-mono text-slate-500">
+                  Latency: {agent.latency}s
+                </span>
+              </div>
             </div>
 
             <h3 className="text-lg font-bold text-white mb-1">{getAgentDisplayName(agent.hostname)}</h3>

@@ -138,22 +138,39 @@ async def agent_heartbeat(heartbeat: AgentHeartbeat):
 @router.get("/")
 async def list_agents():
     """List all registered agents."""
-    # Return raw agent data to ensure metrics field is always included
+    now = datetime.utcnow()
+    stale_threshold = timedelta(seconds=15)
+    offline_threshold = timedelta(minutes=2)
+    
     agent_list = []
     for agent in agents.values():
+        last_heartbeat = agent["last_heartbeat"]
+        latency = (now - last_heartbeat).total_seconds()
+        
+        # Determine health status
+        health = "online"
+        if latency > offline_threshold.total_seconds():
+            health = "offline"
+        elif latency > stale_threshold.total_seconds():
+            health = "stale"
+            
         agent_data = {
             "agent_id": agent["agent_id"],
             "hostname": agent["hostname"],
             "ip_address": agent["ip_address"],
             "capabilities": agent["capabilities"],
-            "status": agent["status"],
-            "last_heartbeat": agent["last_heartbeat"].isoformat(),
+            "status": agent["status"], # idle, scanning, etc.
+            "health": health, # online, stale, offline
+            "latency": round(latency, 2),
+            "last_heartbeat": last_heartbeat.isoformat(),
             "last_scan_time": agent.get("last_scan_time").isoformat() if agent.get("last_scan_time") else None,
             "registered_at": agent["registered_at"].isoformat(),
             "current_assignment": agent.get("current_assignment"),
-            "metrics": agent.get("metrics")  # Explicitly include metrics
+            "metrics": agent.get("metrics"),
+            "metadata": agent.get("metadata", {})
         }
         agent_list.append(agent_data)
+    
     # Manually serialize to ensure None values are included
     json_str = json.dumps(agent_list, default=str)
     return JSONResponse(content=json.loads(json_str))
